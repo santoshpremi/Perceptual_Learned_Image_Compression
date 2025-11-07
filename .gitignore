@@ -1,0 +1,13 @@
+# Python virtual environment
+.venv/
+
+# Dataset and output artifacts
+data/
+outputs/
+literature/
+
+# Misc
+__pycache__/
+*.pyc
+.DS_Store
+
