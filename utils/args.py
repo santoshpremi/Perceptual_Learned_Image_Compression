@@ -1,4 +1,5 @@
 import argparse
+import torch
 
 
 PROJECT_DATA_ROOT = "data"
@@ -127,8 +128,15 @@ def train_options():
     )
     parser.add_argument(
         "--cuda",
-        default=True,
-        help="Use cuda"
+        action="store_true",
+        default=torch.cuda.is_available(),
+        help="Enable CUDA"
+    )
+    parser.add_argument(
+        "--no-cuda",
+        dest="cuda",
+        action="store_false",
+        help="Disable CUDA"
     )
     parser.add_argument(
         "--save",
@@ -203,8 +211,15 @@ def test_options():
     )
     parser.add_argument(
         "--cuda",
-        default=True,
-        help="Use cuda"
+        action="store_true",
+        default=torch.cuda.is_available(),
+        help="Enable CUDA"
+    )
+    parser.add_argument(
+        "--no-cuda",
+        dest="cuda",
+        action="store_false",
+        help="Disable CUDA"
     )
     parser.add_argument(
         "--save",

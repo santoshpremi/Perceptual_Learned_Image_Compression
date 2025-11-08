@@ -1,7 +1,7 @@
 # Core dependencies for the practicum environment.
 # Install PyTorch separately using the official index for your CUDA version.
 
-compressai==1.2.5
+compressai==1.2.1
 numpy>=1.23
 scipy>=1.10
 pillow>=9.5

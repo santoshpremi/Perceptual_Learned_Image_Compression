@@ -1,5 +1,4 @@
 import math
-from turtle import Turtle
 import torch
 import torch.nn as nn
 from pytorch_msssim import ms_ssim
@@ -47,8 +46,7 @@ class CharbonnierLoss(nn.Module):
         self.eps = eps
 
     def forward(self, x, y):
-        loss = torch.sum(torch.sqrt((x - y).pow(2) + self.eps**2))
-        return loss
+        return torch.sqrt((x - y).pow(2) + self.eps**2).mean()
     
 class GANLoss(nn.Module):
     """Define GAN loss.
@@ -174,13 +172,13 @@ class RateDistortionPOELICLoss(nn.Module):
         target_feat = self.vgg(target)
 
         out["charbonnier"] = self.charbonnier(output["x_hat"], target)
-        out["lpips"]       = self.lpips(output["x_hat"], target)
+        out["lpips"]       = self.lpips(output["x_hat"], target).mean()
         x_hat_feat  = [feat for feat in  x_hat_feat]
         target_feat = [feat for feat in  target_feat]
-        style_loss = 0
+        style_loss = 0.0
         for i in range(4):
-            style_loss += torch.mean(self.style(x_hat_feat[i], target_feat[i]))
-        out["style_loss"]  = style_loss
+            style_loss += self.style(x_hat_feat[i], target_feat[i])
+        out["style_loss"]  = style_loss / 4.0
 
         out["loss"] = out["charbonnier"] + out["lpips"] +out["style_loss"] 
         return out
@@ -226,15 +224,14 @@ class RateDistortionPOELICFaceLoss(nn.Module):
         # x_tidle_feat  = self.vgg(x_tidle)
         # target_feat = self.vgg(target)
         out["charbonnier"] = self.charbonnier((1-mask) * x_hat, target)
-        out["lpips"]       = self.lpips(x_tidle, target)
+        out["lpips"]       = self.lpips(x_tidle, target).mean()
         
         x_tidle_feat  = [feat for feat in  x_tidle_feat]
         target_feat = [feat for feat in  target_feat]
-        style_loss = 0
+        style_loss = 0.0
         for i in range(4):
-            style_loss += torch.mean(self.style(x_tidle_feat[i], target_feat[i]))
+            style_loss += self.style(x_tidle_feat[i], target_feat[i])
             # print(x_tidle_feat[i].size(), target_feat[i].size())
-        # return
-        out["style_loss"]  = style_loss
+        out["style_loss"]  = style_loss / 4.0
         out["face_loss"] =  self.mse(mask * target, mask * x_hat)
         return out
