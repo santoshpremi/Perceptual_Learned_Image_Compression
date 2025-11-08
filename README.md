@@ -1,4 +1,4 @@
-# Perceptual Learned Image Compression Praktikum
+# Perceptual Learned Image Compression 
 
 ## Project Scope
 
@@ -66,4 +66,3 @@ Modify `config/config_5group.py` or the CLI options in `utils/args.py` to adjust
 - [x] Supply environment setup and training/evaluation helpers.
 - [ ] Run finetuning/benchmark experiments and collect results.
 - [ ] Document findings and prepare practicum deliverables.
-
