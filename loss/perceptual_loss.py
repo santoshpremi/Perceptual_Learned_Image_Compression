@@ -93,8 +93,8 @@ class PerceptualLoss(torch.nn.Module):
             pred = 2 * pred - 1
         # return self.net.forward(in0, in1, retPerLayer=retPerLayer)
 
-        # pred 是空的
-        return self.net.forward(target, pred, retPerLayer=False)
+        # LPIPS expects (pred, target) order: distance between pred and target
+        return self.net.forward(pred, target, retPerLayer=False)
 
 
 def normalize_tensor(in_feat, eps=1e-10):

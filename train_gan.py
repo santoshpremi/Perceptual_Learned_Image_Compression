@@ -154,7 +154,8 @@ def main():
             args.clip_max_norm,
             logger_train,
             tb_logger,
-            current_step
+            current_step,
+            config
         )
 
         save_dir = os.path.join('./experiments', args.experiment, 'val_images', '%03d' % (epoch + 1))

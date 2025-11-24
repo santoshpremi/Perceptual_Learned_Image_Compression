@@ -248,7 +248,7 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
         f"Bpp loss: {bpp_loss.avg:.4f} | "
         f"Aux loss: {aux_loss.avg:.2f} | "
         f"PSNR: {psnr.avg:.6f} | "
-        f"MS-SSIM: {ms_ssim.avg:.6f}"
+        f"MS-SSIM: {ms_ssim.avg:.6f} |"
         f"LPIPS: {lpips.avg:.6f}"
 
     )

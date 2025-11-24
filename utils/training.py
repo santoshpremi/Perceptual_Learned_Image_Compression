@@ -63,7 +63,7 @@ def train_one_epoch(
     return current_step
 
 def train_one_epoch_gan(
-    model, model_disc, criterion, train_dataloader, optimizer, aux_optimizer, optimizer_D, epoch, clip_max_norm, logger_train, tb_logger, current_step
+    model, model_disc, criterion, train_dataloader, optimizer, aux_optimizer, optimizer_D, epoch, clip_max_norm, logger_train, tb_logger, current_step, config=None
 ):
     model.train()
     device = next(model.parameters()).device
@@ -95,7 +95,20 @@ def train_one_epoch_gan(
         loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
 
         out_criterion = criterion(out_net, d)
-        loss_G_total = (3e-4 * out_criterion["charbonnier"] + 2 * out_criterion["lpips"] + out_criterion["style_loss"] + loss_G_fake + out_criterion["bpp_loss"])
+        # Use config lambda values if provided, otherwise use default hardcoded values for backward compatibility
+        if config is not None:
+            loss_G_total = (config["lambda_char"] * out_criterion["charbonnier"] + 
+                          config["lambda_lpips"] * out_criterion["lpips"] + 
+                          config["lambda_style"] * out_criterion["style_loss"] + 
+                          config["lambda_gan"] * loss_G_fake + 
+                          config["lambda_rate"] * out_criterion["bpp_loss"])
+        else:
+            # Default hardcoded values (for backward compatibility)
+            loss_G_total = (3e-4 * out_criterion["charbonnier"] + 
+                          2 * out_criterion["lpips"] + 
+                          out_criterion["style_loss"] + 
+                          loss_G_fake + 
+                          out_criterion["bpp_loss"])
         loss_G_total.backward(torch.ones_like(loss_G_total))
 
         if clip_max_norm > 0:
