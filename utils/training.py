@@ -6,7 +6,7 @@ from loss.rd_loss import GANLoss
 
 
 def train_one_epoch(
-    model, criterion, train_dataloader, optimizer, aux_optimizer, epoch, clip_max_norm, logger_train, tb_logger, current_step
+    model, criterion, train_dataloader, optimizer, aux_optimizer, epoch, clip_max_norm, logger_train, tb_logger, current_step, config=None
 ):
     model.train()
     device = next(model.parameters()).device
@@ -20,6 +20,22 @@ def train_one_epoch(
         out_net = model(d)
 
         out_criterion = criterion(out_net, d)
+        # For Stage 1 (no GAN): compute total loss from individual components with config lambda weights
+        # Total loss = lambda_char * Charbonnier + lambda_lpips * LPIPS + lambda_style * Style + lambda_rate * Rate (BPP)
+        # Note: RateDistortionPOELICLoss doesn't include BPP in "loss", so we compute it here
+        if config is not None:
+            # Use config lambda values for proper loss weighting (consistent with Stage 2)
+            total_loss = (config["lambda_char"] * out_criterion["charbonnier"] + 
+                         config["lambda_lpips"] * out_criterion["lpips"] + 
+                         config["lambda_style"] * out_criterion["style_loss"] + 
+                         config["lambda_rate"] * out_criterion["bpp_loss"])
+        else:
+            # Fallback to unweighted sum if config not provided (for backward compatibility)
+            total_loss = (out_criterion["charbonnier"] + 
+                         out_criterion["lpips"] + 
+                         out_criterion["style_loss"] + 
+                         out_criterion["bpp_loss"])
+        out_criterion["loss"] = total_loss
         out_criterion["loss"].backward()
         if clip_max_norm > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), clip_max_norm)
@@ -39,7 +55,20 @@ def train_one_epoch(
                 tb_logger.add_scalar('{}'.format('[train]: ms_ssim_loss'), out_criterion["ms_ssim_loss"].item(), current_step)
 
         if i % 100 == 0:
-            if out_criterion["ms_ssim_loss"] is None:
+            # For Stage 1 training with perceptual losses
+            if "charbonnier" in out_criterion:
+                logger_train.info(
+                    f"Train epoch {epoch}: ["
+                    f"{i*len(d):5d}/{len(train_dataloader.dataset)}"
+                    f" ({100. * i / len(train_dataloader):.0f}%)] "
+                    f'Loss: {out_criterion["loss"].item():.4f} | '
+                    f'Charbonnier loss: {out_criterion["charbonnier"].item():.4f} | '
+                    f'LPIPS loss: {out_criterion["lpips"].item():.4f} | '
+                    f'Style loss: {out_criterion["style_loss"].item():.4f} | '
+                    f'Bpp loss: {out_criterion["bpp_loss"].item():.2f} | '
+                    f"Aux loss: {aux_loss.item():.2f}"
+                )
+            elif out_criterion.get("ms_ssim_loss") is None:
                 logger_train.info(
                     f"Train epoch {epoch}: ["
                     f"{i*len(d):5d}/{len(train_dataloader.dataset)}"
@@ -86,7 +115,6 @@ def train_one_epoch_gan(
         loss_D_total.backward()
         optimizer_D.step()
 
-        optimizer_D.zero_grad()
         # 3.backward netG
         optimizer.zero_grad()
         aux_optimizer.zero_grad()
@@ -109,7 +137,7 @@ def train_one_epoch_gan(
                           out_criterion["style_loss"] + 
                           loss_G_fake + 
                           out_criterion["bpp_loss"])
-        loss_G_total.backward(torch.ones_like(loss_G_total))
+        loss_G_total.backward()
 
         if clip_max_norm > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), clip_max_norm)
@@ -172,7 +200,6 @@ def train_one_epoch_gan_face(
         loss_D_total.backward()
         optimizer_D.step()
 
-        optimizer_D.zero_grad()
         # 3.backward netG
         optimizer.zero_grad()
         aux_optimizer.zero_grad()

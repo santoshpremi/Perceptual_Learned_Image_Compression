@@ -14,7 +14,7 @@ from PIL import ImageFile, Image
 from models.models import ELIC
 from utils.testing import test_model
 from utils.logger import setup_logger
-from datasets.vimeo import Vimeo90kTestDataset
+from datasets.open_images import OpenImagesDataset
 
 
 def main():
@@ -35,14 +35,15 @@ def main():
 
     test_transforms = transforms.Compose([transforms.ToTensor()])
 
-    if args.split == "vimeo_test_clean":
-        test_dataset = Vimeo90kTestDataset(
+    # Use Open Images if split is a valid Open Images split, otherwise use ImageFolder (e.g., for Kodak)
+    if args.split in ["train", "validation", "test"]:
+        test_dataset = OpenImagesDataset(
             root=args.dataset,
-            list_file=args.list_file,
-            frame_index=args.frame_index,
+            split=args.split,
             transform=test_transforms,
         )
     else:
+        # Fallback to ImageFolder for other datasets like Kodak
         test_dataset = ImageFolder(args.dataset, split=args.split, transform=test_transforms)
 
     test_dataloader = DataLoader(

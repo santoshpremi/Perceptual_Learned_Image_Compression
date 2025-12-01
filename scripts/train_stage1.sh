@@ -11,7 +11,9 @@ EXTRA_ARGS=()
 
 usage() {
   cat <<'EOF' >&2
-Usage: train_hflic.sh [base_data_dir] [options]
+Usage: train_stage1.sh [base_data_dir] [options]
+
+Stage 1 Training: Train HFLIC without GAN loss.
 
 If base_data_dir is provided, the script assumes the Open Images dataset is under
   base_data_dir/open_images
@@ -19,6 +21,9 @@ and evaluation images live under
   base_data_dir (containing the kodak/ folder for Kodak dataset).
 
 You can override the defaults explicitly with --train-root and --eval-root.
+
+After Stage 1 completes, use train_gan.py (or train_hflic.sh) with --checkpoint
+to finetune with GAN loss (Stage 2).
 EOF
 }
 
@@ -81,7 +86,17 @@ export PYTHONPATH="${SRC_DIR}:${PYTHONPATH:-}"
 
 cd "${PROJECT_ROOT}"
 
-python train_gan.py \
+echo "=========================================="
+echo "Stage 1 Training: Without GAN Loss"
+echo "=========================================="
+echo "Training root: ${TRAIN_ROOT}"
+echo "Evaluation root: ${EVAL_ROOT}"
+echo ""
+
+python train.py \
   --train-root "${TRAIN_ROOT}" \
   --eval-root "${EVAL_ROOT}" \
   "${EXTRA_ARGS[@]}"
+
+
+

@@ -25,21 +25,16 @@ def train_options():
     )
     parser.add_argument(
         "--train-root",
-        default=f"{PROJECT_DATA_ROOT}/vimeo_test_clean",
+        default=f"{PROJECT_DATA_ROOT}/open_images",
         type=str,
-        help="Root directory containing vimeo_test_clean (sequences/ + sep_testlist.txt)"
+        help="Root directory containing Open Images dataset (with train/validation/test subdirectories)"
     )
     parser.add_argument(
-        "--train-list",
-        default="sep_testlist.txt",
+        "--train-split",
+        default="train",
         type=str,
-        help="Relative or absolute path to the Vimeo sequence list file"
-    )
-    parser.add_argument(
-        "--train-frame-index",
-        default=4,
-        type=int,
-        help="Frame index (1-7) to use from each Vimeo sequence"
+        choices=["train", "validation", "test"],
+        help="Open Images split to use for training (default: train)"
     )
     parser.add_argument(
         "--eval-root",
@@ -49,9 +44,9 @@ def train_options():
     )
     parser.add_argument(
         "--eval-split",
-        default="kodak",
+        default="validation",
         type=str,
-        help="Subdirectory name for evaluation images (passed to ImageFolder)"
+        help="Open Images split to use for evaluation (default: validation). Use 'kodak' for Kodak dataset."
     )
     parser.add_argument(
         "-e",

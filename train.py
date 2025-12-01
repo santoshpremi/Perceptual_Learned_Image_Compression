@@ -14,13 +14,12 @@ from compressai.datasets import ImageFolder
 from utils.logger import setup_logger
 from utils.utils import CustomDataParallel, save_checkpoint
 from utils.optimizers import configure_optimizers
-from utils.training import train_one_epoch_gan
-from utils.testing import test_one_epoch_gan
+from utils.training import train_one_epoch
+from utils.testing import test_one_epoch
 from loss.rd_loss import RateDistortionPOELICLoss
 from utils.args import train_options
 from config.config_5group import model_config
 from models.models import ELIC
-from models.disc import Discriminator, init_weights
 from datasets.open_images import OpenImagesDataset
 import random
 import numpy as np
@@ -40,14 +39,25 @@ def setup_seed(seed=3407):
     return seed 
 
 def main():
+    """
+    Stage 1 Training: Train HFLIC without GAN loss.
+    
+    This script trains the compression model using:
+    - Charbonnier loss (L1-like)
+    - LPIPS (perceptual loss)
+    - Style loss
+    - Rate (BPP) loss
+    
+    After training, use train_gan.py to finetune with GAN loss (Stage 2).
+    """
     torch.backends.cudnn.benchmark = True
     ImageFile.LOAD_TRUNCATED_IMAGES = True
     Image.MAX_IMAGE_PIXELS = None
-    seed =  setup_seed()
+    seed = setup_seed()
     args = train_options()
     config = model_config()
 
-    os.environ['CUDA_VISIBLE_DEVICES'] =  ', '.join(str(id) for id in args.gpu_id)
+    os.environ['CUDA_VISIBLE_DEVICES'] = ', '.join(str(id) for id in args.gpu_id)
     device = "cuda" if args.cuda and torch.cuda.is_available() else "cpu"
 
     if not os.path.exists(os.path.join('./experiments', args.experiment)):
@@ -104,25 +114,18 @@ def main():
         pin_memory=(device == "cuda"),
     )
 
+    # Stage 1: Only the compression model (encoder/decoder), no discriminator
     net = ELIC(config=config)
-    net_disc = Discriminator()
 
     if args.cuda and torch.cuda.device_count() > 1:
         net = CustomDataParallel(net)
-        net_disc = CustomDataParallel(net_disc)
     
     net = net.to(device)
-    net_disc.to(device)
-    
-    init_weights(net_disc, init_type='normal', init_gain=0.02)
 
     optimizer, aux_optimizer = configure_optimizers(net, args)
-    # lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, "min")
     lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[80, 100], gamma=0.1)
 
-    optimizer_D = torch.optim.Adam(net_disc.parameters(), lr=args.lr_D)
-    lr_scheduler_D = optim.lr_scheduler.MultiStepLR(optimizer_D, milestones=[80, 100], gamma=0.1)
-
+    # Stage 1 loss: Charbonnier + LPIPS + Style + Rate (NO GAN)
     criterion = RateDistortionPOELICLoss(lmbda=args.lmbda, device=device, gpu_id=args.gpu_id)
     
     if args.checkpoint != None:
@@ -130,11 +133,9 @@ def main():
         net.load_state_dict(checkpoint["state_dict"])
         optimizer.load_state_dict(checkpoint['optimizer'])
         aux_optimizer.load_state_dict(checkpoint['aux_optimizer'])
-        # lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
         lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[450,550], gamma=0.1)
         lr_scheduler._step_count = checkpoint['lr_scheduler']['_step_count']
         lr_scheduler.last_epoch = checkpoint['lr_scheduler']['last_epoch']
-        # print(lr_scheduler.state_dict())
         start_epoch = checkpoint['epoch']
         best_loss = checkpoint['loss']
         current_step = start_epoch * math.ceil(len(train_dataloader.dataset) / args.batch_size)
@@ -144,20 +145,22 @@ def main():
         best_loss = 1e10
         current_step = 0
 
+    logger_train.info("=" * 80)
+    logger_train.info("STAGE 1 TRAINING: Training without GAN loss")
+    logger_train.info("Loss components: Charbonnier + LPIPS + Style + Rate (BPP)")
+    logger_train.info("=" * 80)
     logger_train.info(f"Seed: {seed}")
     logger_train.info(args)
-    # logger_train.info(net)
     optimizer.param_groups[0]['lr'] = args.learning_rate
+    
     for epoch in range(start_epoch, args.epochs):
         logger_train.info(f"Learning rate: {optimizer.param_groups[0]['lr']}")
-        current_step = train_one_epoch_gan(
+        current_step = train_one_epoch(
             net,
-            net_disc,
             criterion,
             train_dataloader,
             optimizer,
             aux_optimizer,
-            optimizer_D,
             epoch,
             args.clip_max_norm,
             logger_train,
@@ -167,10 +170,8 @@ def main():
         )
 
         save_dir = os.path.join('./experiments', args.experiment, 'val_images', '%03d' % (epoch + 1))
-        loss = test_one_epoch_gan(epoch, test_dataloader, net, net_disc, criterion, save_dir, logger_val, tb_logger, config)
-        # lr_scheduler.step(loss)
+        loss = test_one_epoch(epoch, test_dataloader, net, criterion, save_dir, logger_val, tb_logger, config)
         lr_scheduler.step()
-        lr_scheduler_D.step()
 
         is_best = loss < best_loss
         best_loss = min(loss, best_loss)
@@ -190,7 +191,15 @@ def main():
                 os.path.join('./experiments', args.experiment, 'checkpoints', "checkpoint_%03d.pth.tar" % (epoch + 1))
             )
             if is_best:
-                logger_val.info('best checkpoint saved.')
+                logger_val.info('Best checkpoint saved.')
+                logger_train.info(f"Best checkpoint saved at epoch {epoch + 1} with loss {best_loss:.4f}")
+
+    logger_train.info("=" * 80)
+    logger_train.info("STAGE 1 TRAINING COMPLETE")
+    logger_train.info(f"Best loss: {best_loss:.4f}")
+    logger_train.info("Next step: Use train_gan.py with --checkpoint to finetune with GAN loss (Stage 2)")
+    logger_train.info("=" * 80)
 
 if __name__ == '__main__':
     main()
+

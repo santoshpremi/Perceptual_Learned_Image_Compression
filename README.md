@@ -30,34 +30,164 @@ pip install -r requirements.txt
 
 ## Dataset Preparation
 
-- **Vimeo-90K (training/finetuning)**: `bash scripts/download_vimeo.sh /absolute/path/to/data`
-  - Requests access from the dataset authors, prepares directory scaffold, and documents extraction steps.
-  - Training uses the `vimeo_test_clean` split (centre frame `im4.png` per sequence).
+- **Open Images V7 (training/finetuning)**: 
+  - Download image IDs from [Open Images V7](https://storage.googleapis.com/openimages/web/download_v7.html)
+  - Create an image list file with format: `train/<image_id>` (one per line)
+  - Run: `bash scripts/download_open_images.sh --image-list <list_file> /absolute/path/to/data`
+  - Or use: `bash scripts/download_open_images.sh --split train --max-images 1000 /absolute/path/to/data` for a subset
+  - Images will be downloaded to `data/open_images/train/`, `data/open_images/validation/`, etc.
 - **Kodak PhotoCD (evaluation)**: `bash scripts/download_kodak.sh /absolute/path/to/data`
   - Downloads and verifies the 24 Kodak images under `data/kodak/`.
 
-Update `configs/datasets.yaml` to point to the actual dataset locations and maintain train/val filelists under `configs/filelists/`.
-
 ## Training & Evaluation
 
-1. **Training / Finetuning**
-   ```
-   bash scripts/train_hflic.sh /absolute/path/to/data --experiment hflic_vimeo --epochs 200
-   ```
-   The script infers `vimeo_test_clean/` for training frames and `kodak/` for evaluation, sets `PYTHONPATH` to the project root, and executes `train_gan.py` with any additional CLI flags.
-2. **Evaluation (Kodak)**
-   ```
-   bash scripts/eval_hflic.sh /absolute/path/to/kodak outputs/hflic/checkpoints/checkpoint_200.pth.tar
-   ```
-   Computes PSNR/SSIM/LPIPS and saves reconstructions following the official workflow.
-3. **Evaluation (Vimeo-90K test clean)**
-   ```
-   bash scripts/eval_hflic.sh /absolute/path/to/vimeo_test_clean outputs/hflic/checkpoints/checkpoint_200.pth.tar \
-     --split vimeo_test_clean --list-file sep_testlist.txt --frame-index 4 --test-batch-size 1
-   ```
-   Uses the official `sep_testlist.txt` file and centre frame (`im4.png`) for each sequence.
+**Important**: HFLIC requires two-stage training as recommended by the paper authors.
+
+### Complete Workflow
+
+#### 1. Download Datasets
+
+**Download Open Images V7 (training dataset):**
+
+**Option A: Download with image list file (recommended)**
+```bash
+# First, download image IDs from Open Images website and create a list file
+# Format: train/<image_id> (one per line)
+bash scripts/download_open_images.sh --image-list <path/to/image_list.txt> /absolute/path/to/data
+```
+
+**Option B: Download a subset for testing**
+```bash
+# Download first 1000 training images
+bash scripts/download_open_images.sh --split train --max-images 1000 /absolute/path/to/data
+
+# Download validation images
+bash scripts/download_open_images.sh --split validation /absolute/path/to/data
+```
+
+**Download Kodak dataset (for evaluation):**
+```bash
+bash scripts/download_kodak.sh /absolute/path/to/data
+```
+
+#### 2. Stage 1: Pre-training without GAN (Required first)
+
+```bash
+bash scripts/train_stage1.sh /absolute/path/to/data \
+  --experiment hflic_stage1 \
+  --epochs 100 \
+  --batch-size 8 \
+  --gpu_id 0
+```
+
+**With additional options:**
+```bash
+bash scripts/train_stage1.sh /absolute/path/to/data \
+  --experiment hflic_stage1 \
+  --epochs 100 \
+  --batch-size 8 \
+  --learning-rate 1e-4 \
+  --gpu_id 0 \
+  --train-split train \
+  --eval-split kodak
+```
+
+**Loss components**: Charbonnier (λ=2e-6) + LPIPS (λ=1) + Style (λ=1e2) + Rate/BPP (λ=0.3)  
+**Output checkpoint**: `./experiments/hflic_stage1/checkpoints/checkpoint_best_loss.pth.tar`
+
+#### 3. Stage 2: Finetuning with GAN (After Stage 1 completes)
+
+```bash
+bash scripts/train_hflic.sh /absolute/path/to/data \
+  --experiment hflic_stage2 \
+  --checkpoint ./experiments/hflic_stage1/checkpoints/checkpoint_best_loss.pth.tar \
+  --epochs 100 \
+  --batch-size 8 \
+  --gpu_id 0
+```
+
+**Or use a specific epoch checkpoint:**
+```bash
+bash scripts/train_hflic.sh /absolute/path/to/data \
+  --experiment hflic_stage2 \
+  --checkpoint ./experiments/hflic_stage1/checkpoints/checkpoint_050.pth.tar \
+  --epochs 100 \
+  --batch-size 8 \
+  --gpu_id 0
+```
+
+**Loss components**: Charbonnier (λ=2e-6) + LPIPS (λ=1) + Style (λ=1e2) + GAN (λ=1) + Rate/BPP (λ=0.3)  
+**Output checkpoint**: `./experiments/hflic_stage2/checkpoints/checkpoint_best_loss.pth.tar`
+
+#### 4. Evaluation
+
+**Evaluate on Kodak dataset:**
+```bash
+bash scripts/eval_hflic.sh /absolute/path/to/data/kodak \
+  ./experiments/hflic_stage2/checkpoints/checkpoint_best_loss.pth.tar \
+  --split kodak \
+  --test-batch-size 1 \
+  --gpu_id 0
+```
+
+**Evaluate on Open Images validation:**
+```bash
+bash scripts/eval_hflic.sh /absolute/path/to/data/open_images \
+  ./experiments/hflic_stage2/checkpoints/checkpoint_best_loss.pth.tar \
+  --split validation \
+  --test-batch-size 1 \
+  --gpu_id 0
+```
+
+### Quick Start Example
+
+```bash
+# Set your data directory
+DATA_DIR="/absolute/path/to/data"
+
+# 1. Download datasets
+bash scripts/download_kodak.sh ${DATA_DIR}
+bash scripts/download_open_images.sh --split train --max-images 5000 ${DATA_DIR}
+bash scripts/download_open_images.sh --split validation ${DATA_DIR}
+
+# 2. Stage 1: Pre-training (100 epochs)
+bash scripts/train_stage1.sh ${DATA_DIR} \
+  --experiment hflic_stage1 \
+  --epochs 100 \
+  --batch-size 8 \
+  --gpu_id 0
+
+# 3. Stage 2: GAN finetuning (100 epochs)
+bash scripts/train_hflic.sh ${DATA_DIR} \
+  --experiment hflic_stage2 \
+  --checkpoint ./experiments/hflic_stage1/checkpoints/checkpoint_best_loss.pth.tar \
+  --epochs 100 \
+  --batch-size 8 \
+  --gpu_id 0
+
+# 4. Evaluation on Kodak
+bash scripts/eval_hflic.sh ${DATA_DIR}/kodak \
+  ./experiments/hflic_stage2/checkpoints/checkpoint_best_loss.pth.tar \
+  --split kodak \
+  --gpu_id 0
+```
 
 Modify `config/config_5group.py` or the CLI options in `utils/args.py` to adjust lambda settings, batch size, GPU selection, and dataset splits as needed.
+
+### Training Workflow Summary
+
+```
+Stage 1 (Pre-training): train.py
+├── Loss: Charbonnier + LPIPS + Style + Rate (BPP)
+├── No discriminator
+└── Output: checkpoint_best_loss.pth.tar
+
+Stage 2 (GAN finetuning): train_gan.py  
+├── Load: checkpoint from Stage 1
+├── Loss: Charbonnier + LPIPS + Style + GAN + Rate (BPP)
+├── With discriminator
+└── Output: Final model with improved perceptual quality
+```
 
 ## Current Status
 
