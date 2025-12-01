@@ -163,6 +163,7 @@ def test_model(test_dataloader, net, logger_test, save_dir, epoch, gpu_id):
     device = next(net.parameters()).device
     avg_psnr = AverageMeter()
     avg_ms_ssim = AverageMeter()
+    avg_lpips = AverageMeter()
     avg_bpp = AverageMeter()
 
     avg_enc_dec_time = AverageMeter()
@@ -172,6 +173,13 @@ def test_model(test_dataloader, net, logger_test, save_dir, epoch, gpu_id):
     avg_dec_entropy_time = AverageMeter()
     avg_encoder_time = AverageMeter()
     avg_decoder_time = AverageMeter()
+    
+    # Initialize LPIPS model for evaluation
+    lpips_model = ps.PerceptualLoss(model='net-lin', net='vgg',
+                                   use_gpu=torch.cuda.is_available(),
+                                   gpu_ids=[gpu_id] if isinstance(gpu_id, int) else gpu_id)
+    lpips_model.eval()
+    
     with torch.no_grad():
         for i, img in enumerate(test_dataloader):
             img = img.to(device)
@@ -186,13 +194,25 @@ def test_model(test_dataloader, net, logger_test, save_dir, epoch, gpu_id):
             img_pad = F.pad(img, (0, pad_w, 0, pad_h), mode='constant', value=0)
             bpp, enc_time, enc_entropy_time, encoder_time = compress_one_image(model=net, x=img_pad, stream_path=save_dir, H=H, W=W, img_name=str(i))
             x_hat, dec_time, dec_entropy_time, decoder_time = decompress_one_image(model=net, stream_path=save_dir, img_name=str(i))
-            rec = torch2img(x_hat)
-            img = torch2img(img)
-            #img.save(os.path.join(save_dir, '%03d_gt.png' % i))
+            
+            # Crop x_hat to original size (remove padding)
+            x_hat_cropped = x_hat[:, :, :H, :W]
+            
+            # Convert to PIL for PSNR/MS-SSIM computation
+            rec = torch2img(x_hat_cropped)
+            img_pil = torch2img(img)
+            #img_pil.save(os.path.join(save_dir, '%03d_gt.png' % i))
             rec.save(os.path.join(save_dir, '%03d_rec.png' % i))
-            p, m = compute_metrics(rec, img)
+            
+            # Compute PSNR and MS-SSIM
+            p, m = compute_metrics(rec, img_pil)
             avg_psnr.update(p)
             avg_ms_ssim.update(m)
+            
+            # Compute LPIPS (expects tensors in [0,1] range, shape [B,C,H,W])
+            lpips_val = lpips_model(x_hat_cropped, img).mean().item()
+            avg_lpips.update(lpips_val)
+            
             avg_bpp.update(bpp)
             avg_enc_time.update(enc_time)
             avg_dec_time.update(dec_time)
@@ -205,7 +225,8 @@ def test_model(test_dataloader, net, logger_test, save_dir, epoch, gpu_id):
                 f"Image[{i}] | "
                 f"Bpp loss: {bpp:.4f} | "
                 f"PSNR: {p:.4f} | "
-                f"MS-SSIM: {m:.4f} "
+                f"MS-SSIM: {m:.4f} | "
+                f"LPIPS: {lpips_val:.6f} "
                 f"Time: {enc_time+dec_time:.4f} | "
                 f"Enc Time: {enc_time:.4f} | "
                 f"Entropy Enc Time: {enc_entropy_time:.4f} | "
@@ -216,8 +237,8 @@ def test_model(test_dataloader, net, logger_test, save_dir, epoch, gpu_id):
         f"Epoch:[{epoch}] | "
         f"Avg Bpp: {avg_bpp.avg:.4f} | "
         f"Avg PSNR: {avg_psnr.avg:.4f} | "
-        f"Avg MS-SSIM: {avg_ms_ssim.avg:.4f} "
-
+        f"Avg MS-SSIM: {avg_ms_ssim.avg:.4f} | "
+        f"Avg LPIPS: {avg_lpips.avg:.6f} "
         f"Avg Time: {avg_enc_dec_time.avg:.4f} | "
         f"Avg Enc Time: {avg_enc_time.avg:.4f} | "
         f"Avg Dec Time: {avg_dec_time.avg:.4f} | "
