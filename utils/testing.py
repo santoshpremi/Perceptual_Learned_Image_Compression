@@ -28,7 +28,30 @@ def test_one_epoch(epoch, test_dataloader, model, criterion, save_dir, logger_va
     with torch.no_grad():
         for i, d in enumerate(test_dataloader):
             d = d.to(device)
-            out_net = model(d)
+            
+            # Handle padding for images not divisible by 64
+            B, C, H, W = d.shape
+            pad_h = 0
+            pad_w = 0
+            if H % 64 != 0:
+                pad_h = 64 * (H // 64 + 1) - H
+            if W % 64 != 0:
+                pad_w = 64 * (W // 64 + 1) - W
+            
+            # Pad image if needed
+            if pad_h > 0 or pad_w > 0:
+                d_pad = F.pad(d, (0, pad_w, 0, pad_h), mode='constant', value=0)
+            else:
+                d_pad = d
+            
+            # Forward pass with padded image
+            out_net = model(d_pad)
+            
+            # Crop output back to original size before computing loss
+            if pad_h > 0 or pad_w > 0:
+                out_net['x_hat'] = out_net['x_hat'][:, :, :H, :W]
+            
+            # Now compute loss with correctly sized tensors
             out_criterion = criterion(out_net, d)
 
             aux_loss.update(model.aux_loss())
@@ -267,7 +290,30 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     with torch.no_grad():
         for i, d in enumerate(test_dataloader):
             d = d.to(device)
-            out_net = model(d)
+            
+            # Handle padding for images not divisible by 64
+            B, C, H, W = d.shape
+            pad_h = 0
+            pad_w = 0
+            if H % 64 != 0:
+                pad_h = 64 * (H // 64 + 1) - H
+            if W % 64 != 0:
+                pad_w = 64 * (W // 64 + 1) - W
+            
+            # Pad image if needed
+            if pad_h > 0 or pad_w > 0:
+                d_pad = F.pad(d, (0, pad_w, 0, pad_h), mode='constant', value=0)
+            else:
+                d_pad = d
+            
+            # Forward pass with padded image
+            out_net = model(d_pad)
+            
+            # Crop output back to original size before computing loss
+            if pad_h > 0 or pad_w > 0:
+                out_net['x_hat'] = out_net['x_hat'][:, :, :H, :W]
+            
+            # Now compute loss with correctly sized tensors
             out_criterion = criterion(out_net, d)
 
             pred_fake = model_disc(out_net["x_hat"])
@@ -352,7 +398,30 @@ def test_one_epoch_gan_face(epoch, test_dataloader, model, model_disc,criterion,
             d = d.to(device)
             mask = d[:, 3:, :, :]   # /255.0     mask_roi
             img = d[:, :3, :, :]    # /255.0
-            out_net = model(img)
+            
+            # Handle padding for images not divisible by 64
+            B, C, H, W = img.shape
+            pad_h = 0
+            pad_w = 0
+            if H % 64 != 0:
+                pad_h = 64 * (H // 64 + 1) - H
+            if W % 64 != 0:
+                pad_w = 64 * (W // 64 + 1) - W
+            
+            # Pad image if needed
+            if pad_h > 0 or pad_w > 0:
+                img_pad = F.pad(img, (0, pad_w, 0, pad_h), mode='constant', value=0)
+            else:
+                img_pad = img
+            
+            # Forward pass with padded image
+            out_net = model(img_pad)
+            
+            # Crop output back to original size before computing loss
+            if pad_h > 0 or pad_w > 0:
+                out_net['x_hat'] = out_net['x_hat'][:, :, :H, :W]
+            
+            # Now compute loss with correctly sized tensors
             out_criterion = criterion(out_net, img, mask)
 
             pred_fake = model_disc(out_criterion["x_tidle"])
