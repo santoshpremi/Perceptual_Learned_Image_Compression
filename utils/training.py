@@ -49,9 +49,9 @@ def train_one_epoch(
         if current_step % 100 == 0:
             tb_logger.add_scalar('{}'.format('[train]: loss'), out_criterion["loss"].item(), current_step)
             tb_logger.add_scalar('{}'.format('[train]: bpp_loss'), out_criterion["bpp_loss"].item(), current_step)
-            if out_criterion["mse_loss"] is not None:
+            if out_criterion.get("mse_loss") is not None:
                 tb_logger.add_scalar('{}'.format('[train]: mse_loss'), out_criterion["mse_loss"].item(), current_step)
-            if out_criterion["ms_ssim_loss"] is not None:
+            if out_criterion.get("ms_ssim_loss") is not None:
                 tb_logger.add_scalar('{}'.format('[train]: ms_ssim_loss'), out_criterion["ms_ssim_loss"].item(), current_step)
 
         if i % 100 == 0:
@@ -69,12 +69,14 @@ def train_one_epoch(
                     f"Aux loss: {aux_loss.item():.2f}"
                 )
             elif out_criterion.get("ms_ssim_loss") is None:
+                mse_val = out_criterion.get("mse_loss")
+                mse_str = f'{mse_val.item():.4f}' if mse_val is not None else 'N/A'
                 logger_train.info(
                     f"Train epoch {epoch}: ["
                     f"{i*len(d):5d}/{len(train_dataloader.dataset)}"
                     f" ({100. * i / len(train_dataloader):.0f}%)] "
                     f'Loss: {out_criterion["loss"].item():.4f} | '
-                    f'MSE loss: {out_criterion["mse_loss"].item():.4f} | '
+                    f'MSE loss: {mse_str} | '
                     f'Bpp loss: {out_criterion["bpp_loss"].item():.2f} | '
                     f"Aux loss: {aux_loss.item():.2f}"
                 )

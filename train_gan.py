@@ -79,8 +79,9 @@ def main():
     )
     # Use Open Images for evaluation if eval_split is a valid Open Images split, otherwise use ImageFolder (e.g., for Kodak)
     if args.eval_split in ["train", "validation", "test"]:
+        # For Open Images splits, use the same root as training (open_images directory)
         test_dataset = OpenImagesDataset(
-            root=args.eval_root,
+            root=args.train_root,
             split=args.eval_split,
             transform=test_transforms,
         )
