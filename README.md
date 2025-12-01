@@ -47,28 +47,48 @@ pip install -r requirements.txt
 
 #### 1. Download Datasets
 
-**Download Open Images V7 (training dataset):**
+**Download Open Images V7 (automatically fetches image IDs from S3):**
 
-**Option A: Download with image list file (recommended)**
+**Option A: Download 1000 images per split (Quick Setup)**
 ```bash
-# First, download image IDs from Open Images website and create a list file
-# Format: train/<image_id> (one per line)
-bash scripts/download_open_images.sh --image-list <path/to/image_list.txt> /absolute/path/to/data
+DATA_DIR="/absolute/path/to/data"
+
+# Download 1000 training images
+bash scripts/download_open_images.sh --split train --max-images 1000 ${DATA_DIR}
+
+# Download 1000 validation images
+bash scripts/download_open_images.sh --split validation --max-images 1000 ${DATA_DIR}
+
+# Download 1000 test images (for future evaluation)
+bash scripts/download_open_images.sh --split test --max-images 1000 ${DATA_DIR}
 ```
 
-**Option B: Download a subset for testing**
+**Option B: Download FULL dataset (Complete Setup - takes hours/days)**
 ```bash
-# Download first 1000 training images
-bash scripts/download_open_images.sh --split train --max-images 1000 /absolute/path/to/data
+DATA_DIR="/absolute/path/to/data"
 
-# Download validation images
-bash scripts/download_open_images.sh --split validation /absolute/path/to/data
+# Download FULL training dataset (millions of images)
+bash scripts/download_open_images.sh --split train --full ${DATA_DIR}
+
+# Download FULL validation dataset
+bash scripts/download_open_images.sh --split validation --full ${DATA_DIR}
+
+# Download FULL test dataset
+bash scripts/download_open_images.sh --split test --full ${DATA_DIR}
+```
+
+**Option C: Download with custom image list file**
+```bash
+# If you have a specific list of image IDs
+bash scripts/download_open_images.sh --image-list <path/to/image_list.txt> /absolute/path/to/data
 ```
 
 **Download Kodak dataset (for evaluation):**
 ```bash
 bash scripts/download_kodak.sh /absolute/path/to/data
 ```
+
+**Note**: The script automatically fetches image IDs from Open Images S3 bucket. No manual .txt files needed!
 
 #### 2. Stage 1: Pre-training without GAN (Required first)
 

@@ -14,4 +14,5 @@ opencv-python>=4.8
 tensorboard>=2.14
 wandb>=0.16
 einops>=0.7
+boto3>=1.26.0
 
