@@ -126,8 +126,9 @@ def main():
     optimizer, aux_optimizer = configure_optimizers(net, args)
     lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[80, 100], gamma=0.1)
 
-    # Stage 1 loss: Charbonnier + LPIPS + Style + Rate (NO GAN)
-    criterion = RateDistortionPOELICLoss(lmbda=args.lmbda, device=device, gpu_id=args.gpu_id)
+    # Phase 1 loss: Rate-Distortion + LPIPS + Style + Rate (NO GAN)
+    # Use metrics='mse' for MSE-based or 'ms-ssim' for MS-SSIM based rate-distortion
+    criterion = RateDistortionPOELICLoss(lmbda=args.lmbda, device=device, gpu_id=args.gpu_id, metrics='mse')
     
     if args.checkpoint != None:
         checkpoint = torch.load(args.checkpoint)
@@ -147,8 +148,8 @@ def main():
         current_step = 0
 
     logger_train.info("=" * 80)
-    logger_train.info("STAGE 1 TRAINING: Training without GAN loss")
-    logger_train.info("Loss components: Charbonnier + LPIPS + Style + Rate (BPP)")
+    logger_train.info("PHASE 1 TRAINING: Training with Rate-Distortion loss (replaces Charbonnier)")
+    logger_train.info("Loss components: Rate-Distortion (MSE/MS-SSIM) + LPIPS + Style + Rate (BPP)")
     logger_train.info("=" * 80)
     logger_train.info(f"Seed: {seed}")
     logger_train.info(args)
@@ -196,9 +197,9 @@ def main():
                 logger_train.info(f"Best checkpoint saved at epoch {epoch + 1} with loss {best_loss:.4f}")
 
     logger_train.info("=" * 80)
-    logger_train.info("STAGE 1 TRAINING COMPLETE")
+    logger_train.info("PHASE 1 TRAINING COMPLETE")
     logger_train.info(f"Best loss: {best_loss:.4f}")
-    logger_train.info("Next step: Use train_gan.py with --checkpoint to finetune with GAN loss (Stage 2)")
+    logger_train.info("Next step: Use train_gan.py with --checkpoint to finetune with GAN loss and DISTS/PIEAPP (Phase 2)")
     logger_train.info("=" * 80)
 
 if __name__ == '__main__':

@@ -16,7 +16,7 @@ from utils.utils import CustomDataParallel, save_checkpoint
 from utils.optimizers import configure_optimizers
 from utils.training import train_one_epoch_gan
 from utils.testing import test_one_epoch_gan
-from loss.rd_loss import RateDistortionPOELICLoss
+from loss.rd_loss import RateDistortionPOELICLossPhase2
 from utils.args import train_options
 from config.config_5group import model_config
 from models.models import ELIC
@@ -124,7 +124,8 @@ def main():
     optimizer_D = torch.optim.Adam(net_disc.parameters(), lr=args.lr_D)
     lr_scheduler_D = optim.lr_scheduler.MultiStepLR(optimizer_D, milestones=[80, 100], gamma=0.1)
 
-    criterion = RateDistortionPOELICLoss(lmbda=args.lmbda, device=device, gpu_id=args.gpu_id)
+    # Phase 2 loss: Enhanced perceptual loss with DISTS and PIEAPP
+    criterion = RateDistortionPOELICLossPhase2(lmbda=args.lmbda, device=device, gpu_id=args.gpu_id)
     
     if args.checkpoint != None:
         checkpoint = torch.load(args.checkpoint)

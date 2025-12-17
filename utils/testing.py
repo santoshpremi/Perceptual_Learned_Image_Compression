@@ -56,13 +56,26 @@ def test_one_epoch(epoch, test_dataloader, model, criterion, save_dir, logger_va
 
             aux_loss.update(model.aux_loss())
             bpp_loss.update(out_criterion["bpp_loss"])
-            # For Stage 1: compute total loss if not already computed, using config lambda weights
+            # Phase 1: compute total loss if not already computed, using config lambda weights
             if "loss" not in out_criterion or out_criterion.get("loss") is None:
-                # Compute total loss: lambda_char * Charbonnier + lambda_lpips * LPIPS + lambda_style * Style + lambda_rate * Rate (BPP)
-                if "charbonnier" in out_criterion:
+                # Check if using new RD loss or old Charbonnier
+                if "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
                     if config is not None:
                         # Use config lambda values for proper loss weighting (consistent with training)
-                        out_criterion["loss"] = (config["lambda_char"] * out_criterion["charbonnier"] + 
+                        out_criterion["loss"] = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
+                                               config["lambda_lpips"] * out_criterion["lpips"] + 
+                                               config["lambda_style"] * out_criterion["style_loss"] + 
+                                               config["lambda_rate"] * out_criterion["bpp_loss"])
+                    else:
+                        # Fallback to unweighted sum if config not provided
+                        out_criterion["loss"] = (out_criterion["rd_loss"] + 
+                                               out_criterion["lpips"] + 
+                                               out_criterion["style_loss"] + 
+                                               out_criterion["bpp_loss"])
+                elif "charbonnier" in out_criterion and out_criterion.get("charbonnier") is not None:
+                    if config is not None:
+                        # Use config lambda values for proper loss weighting (consistent with training)
+                        out_criterion["loss"] = (config.get("lambda_char", 2e-6) * out_criterion["charbonnier"] + 
                                                config["lambda_lpips"] * out_criterion["lpips"] + 
                                                config["lambda_style"] * out_criterion["style_loss"] + 
                                                config["lambda_rate"] * out_criterion["bpp_loss"])
@@ -77,8 +90,12 @@ def test_one_epoch(epoch, test_dataloader, model, criterion, save_dir, logger_va
                 mse_loss.update(out_criterion["mse_loss"])
             if out_criterion.get("ms_ssim_loss") is not None:
                 ms_ssim_loss.update(out_criterion["ms_ssim_loss"])
-            # Log perceptual losses for Stage 1 training
-            if "charbonnier" in out_criterion:
+            # Log perceptual losses for Phase 1 training
+            if "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
+                # RD loss case - no charbonnier to log
+                lpips.update(out_criterion["lpips"].item())
+                style_loss.update(out_criterion["style_loss"].item())
+            elif "charbonnier" in out_criterion and out_criterion.get("charbonnier") is not None:
                 charbonnier.update(out_criterion["charbonnier"].item())
                 lpips.update(out_criterion["lpips"].item())
                 style_loss.update(out_criterion["style_loss"].item())
@@ -99,22 +116,40 @@ def test_one_epoch(epoch, test_dataloader, model, criterion, save_dir, logger_va
     tb_logger.add_scalar('{}'.format('[val]: psnr'), psnr.avg, epoch + 1)
     tb_logger.add_scalar('{}'.format('[val]: ms-ssim'), ms_ssim.avg, epoch + 1)
     
-    # Log perceptual losses for Stage 1 if available
-    if charbonnier.count > 0:
-        tb_logger.add_scalar('{}'.format('[val]: charbonnier loss'), charbonnier.avg, epoch + 1)
+    # Log RD loss if available
+    if "rd_loss" in out_criterion and out_criterion.get("rd_loss") is not None:
+        # We need to track this during the loop, but for now just log if available
+        pass
+    
+    # Log perceptual losses for Phase 1 if available
+    if lpips.count > 0:
         tb_logger.add_scalar('{}'.format('[val]: lpips'), lpips.avg, epoch + 1)
         tb_logger.add_scalar('{}'.format('[val]: style loss'), style_loss.avg, epoch + 1)
-        logger_val.info(
-            f"Test epoch {epoch}: Average losses: "
-            f"Loss: {loss.avg:.4f} | "
-            f"Charbonnier loss: {charbonnier.avg:.4f} | "
-            f"LPIPS loss: {lpips.avg:.4f} | "
-            f"Style loss: {style_loss.avg:.4f} | "
-            f"Bpp loss: {bpp_loss.avg:.4f} | "
-            f"Aux loss: {aux_loss.avg:.2f} | "
-            f"PSNR: {psnr.avg:.6f} | "
-            f"MS-SSIM: {ms_ssim.avg:.6f}"
-        )
+        if charbonnier.count > 0:
+            tb_logger.add_scalar('{}'.format('[val]: charbonnier loss'), charbonnier.avg, epoch + 1)
+            logger_val.info(
+                f"Test epoch {epoch}: Average losses: "
+                f"Loss: {loss.avg:.4f} | "
+                f"Charbonnier loss: {charbonnier.avg:.4f} | "
+                f"LPIPS loss: {lpips.avg:.4f} | "
+                f"Style loss: {style_loss.avg:.4f} | "
+                f"Bpp loss: {bpp_loss.avg:.4f} | "
+                f"Aux loss: {aux_loss.avg:.2f} | "
+                f"PSNR: {psnr.avg:.6f} dB | "
+                f"MS-SSIM: {ms_ssim.avg:.6f} dB"
+            )
+        else:
+            # RD loss case
+            logger_val.info(
+                f"Test epoch {epoch}: Average losses: "
+                f"Loss: {loss.avg:.4f} | "
+                f"LPIPS loss: {lpips.avg:.4f} | "
+                f"Style loss: {style_loss.avg:.4f} | "
+                f"Bpp loss: {bpp_loss.avg:.4f} | "
+                f"Aux loss: {aux_loss.avg:.2f} | "
+                f"PSNR: {psnr.avg:.6f} dB | "
+                f"MS-SSIM: {ms_ssim.avg:.6f} dB"
+            )
     elif mse_loss.count > 0:
         logger_val.info(
             f"Test epoch {epoch}: Average losses: "
@@ -122,8 +157,8 @@ def test_one_epoch(epoch, test_dataloader, model, criterion, save_dir, logger_va
             f"MSE loss: {mse_loss.avg:.4f} | "
             f"Bpp loss: {bpp_loss.avg:.4f} | "
             f"Aux loss: {aux_loss.avg:.2f} | "
-            f"PSNR: {psnr.avg:.6f} | "
-            f"MS-SSIM: {ms_ssim.avg:.6f}"
+            f"PSNR: {psnr.avg:.6f} dB | "
+            f"MS-SSIM: {ms_ssim.avg:.6f} dB"
         )
         tb_logger.add_scalar('{}'.format('[val]: mse_loss'), mse_loss.avg, epoch + 1)
     elif ms_ssim_loss.count > 0:
@@ -133,8 +168,8 @@ def test_one_epoch(epoch, test_dataloader, model, criterion, save_dir, logger_va
             f"MS-SSIM loss: {ms_ssim_loss.avg:.4f} | "
             f"Bpp loss: {bpp_loss.avg:.4f} | "
             f"Aux loss: {aux_loss.avg:.2f} | "
-            f"PSNR: {psnr.avg:.6f} | "
-            f"MS-SSIM: {ms_ssim.avg:.6f}"
+            f"PSNR: {psnr.avg:.6f} dB | "
+            f"MS-SSIM: {ms_ssim.avg:.6f} dB"
         )
         tb_logger.add_scalar('{}'.format('[val]: ms_ssim_loss'), ms_ssim_loss.avg, epoch + 1)
 
@@ -247,8 +282,8 @@ def test_model(test_dataloader, net, logger_test, save_dir, epoch, gpu_id):
             logger_test.info(
                 f"Image[{i}] | "
                 f"Bpp loss: {bpp:.4f} | "
-                f"PSNR: {p:.4f} | "
-                f"MS-SSIM: {m:.4f} | "
+                f"PSNR: {p:.4f} dB | "
+                f"MS-SSIM: {m:.4f} dB | "
                 f"LPIPS: {lpips_val:.6f} "
                 f"Time: {enc_time+dec_time:.4f} | "
                 f"Enc Time: {enc_time:.4f} | "
@@ -259,8 +294,8 @@ def test_model(test_dataloader, net, logger_test, save_dir, epoch, gpu_id):
     logger_test.info(
         f"Epoch:[{epoch}] | "
         f"Avg Bpp: {avg_bpp.avg:.4f} | "
-        f"Avg PSNR: {avg_psnr.avg:.4f} | "
-        f"Avg MS-SSIM: {avg_ms_ssim.avg:.4f} | "
+        f"Avg PSNR: {avg_psnr.avg:.4f} dB | "
+        f"Avg MS-SSIM: {avg_ms_ssim.avg:.4f} dB | "
         f"Avg LPIPS: {avg_lpips.avg:.6f} "
         f"Avg Time: {avg_enc_dec_time.avg:.4f} | "
         f"Avg Enc Time: {avg_enc_time.avg:.4f} | "
@@ -284,6 +319,8 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     style_loss = AverageMeter() 
     adv_loss = AverageMeter() 
     aux_loss = AverageMeter()
+    dists = AverageMeter()
+    pieapp = AverageMeter()
     psnr = AverageMeter()
     ms_ssim = AverageMeter()
 
@@ -318,20 +355,24 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
 
             pred_fake = model_disc(out_net["x_hat"])
             loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
-            # Use config lambda values if provided, otherwise use default hardcoded values for backward compatibility
+            # Phase 2: Include DISTS and PIEAPP losses
             if config is not None:
-                loss_G_total = (config["lambda_char"] * out_criterion["charbonnier"] + 
+                loss_G_total = (config.get("lambda_char", 2e-6) * out_criterion.get("charbonnier", 0) + 
                               config["lambda_lpips"] * out_criterion["lpips"] + 
                               config["lambda_style"] * out_criterion["style_loss"] + 
                               config["lambda_gan"] * loss_G_fake + 
-                              config["lambda_rate"] * out_criterion["bpp_loss"])
+                              config["lambda_rate"] * out_criterion["bpp_loss"] +
+                              config.get("lambda_dists", 0.5) * out_criterion.get("dists", 0) +
+                              config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))
             else:
                 # Default hardcoded values (for backward compatibility)
-                loss_G_total = (3e-4 * out_criterion["charbonnier"] + 
+                loss_G_total = (3e-4 * out_criterion.get("charbonnier", 0) + 
                               2 * out_criterion["lpips"] + 
                               out_criterion["style_loss"] + 
                               loss_G_fake + 
-                              out_criterion["bpp_loss"])
+                              out_criterion["bpp_loss"] +
+                              0.5 * out_criterion.get("dists", 0) +
+                              0.3 * out_criterion.get("pieapp", 0))
 
             aux_loss.update(model.aux_loss())
             bpp_loss.update(out_criterion["bpp_loss"].item())
@@ -339,8 +380,16 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
             lpips.update(out_criterion["lpips"].item())
             style_loss.update(out_criterion["style_loss"].item())
             adv_loss.update(loss_G_fake.item())
-            if out_criterion["charbonnier"] is not None:
+            if out_criterion.get("charbonnier") is not None:
                 charbonnier.update(out_criterion["charbonnier"].item())
+            if out_criterion.get("dists") is not None:
+                dists_val = out_criterion["dists"]
+                if isinstance(dists_val, torch.Tensor):
+                    dists.update(dists_val.item())
+            if out_criterion.get("pieapp") is not None:
+                pieapp_val = out_criterion["pieapp"]
+                if isinstance(pieapp_val, torch.Tensor):
+                    pieapp.update(pieapp_val.item())
 
             rec = torch2img(out_net['x_hat'])
             img = torch2img(d)
@@ -359,20 +408,31 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     tb_logger.add_scalar('{}'.format('[val]: ms-ssim'), ms_ssim.avg, epoch + 1)
     tb_logger.add_scalar('{}'.format('[val]: lpips'), lpips.avg, epoch + 1)
     tb_logger.add_scalar('{}'.format('[val]: style loss'), style_loss.avg, epoch + 1)
+    if charbonnier.count > 0:
+        tb_logger.add_scalar('{}'.format('[val]: charbonnier loss'), charbonnier.avg, epoch + 1)
+    if dists.count > 0:
+        tb_logger.add_scalar('{}'.format('[val]: dists loss'), dists.avg, epoch + 1)
+    if pieapp.count > 0:
+        tb_logger.add_scalar('{}'.format('[val]: pieapp loss'), pieapp.avg, epoch + 1)
+    
+    charbonnier_str = f"{charbonnier.avg:.4f}" if charbonnier.count > 0 else "N/A"
+    dists_str = f"{dists.avg:.4f}" if dists.count > 0 else "N/A"
+    pieapp_str = f"{pieapp.avg:.4f}" if pieapp.count > 0 else "N/A"
+    
     logger_val.info(
         f"Test epoch {epoch}: Average losses: "
         f"Loss: {loss.avg:.4f} | "
-        f"Charbonnier loss: {charbonnier.avg:.4f} | "
+        f"Charbonnier loss: {charbonnier_str} | "
+        f"LPIPS loss: {lpips.avg:.4f} | "
         f"Style loss: {style_loss.avg:.4f} | "
+        f"DISTS loss: {dists_str} | "
+        f"PIEAPP loss: {pieapp_str} | "
         f"Adv loss: {adv_loss.avg:.4f} | "
         f"Bpp loss: {bpp_loss.avg:.4f} | "
         f"Aux loss: {aux_loss.avg:.2f} | "
-        f"PSNR: {psnr.avg:.6f} | "
-        f"MS-SSIM: {ms_ssim.avg:.6f} |"
-        f"LPIPS: {lpips.avg:.6f}"
-
+        f"PSNR: {psnr.avg:.6f} dB | "
+        f"MS-SSIM: {ms_ssim.avg:.6f} dB"
     )
-    tb_logger.add_scalar('{}'.format('[val]: charbonnier loss'), charbonnier.avg, epoch + 1)
     
     return loss.avg
 
@@ -470,8 +530,8 @@ def test_one_epoch_gan_face(epoch, test_dataloader, model, model_disc,criterion,
         f"Face loss: {face_loss.avg:.6f} | "
         f"Bpp loss: {bpp_loss.avg:.4f} | "
         f"Aux loss: {aux_loss.avg:.2f} | "
-        f"PSNR: {psnr.avg:.4f} | "
-        f"MS-SSIM: {ms_ssim.avg:.6f} | "
+        f"PSNR: {psnr.avg:.4f} dB | "
+        f"MS-SSIM: {ms_ssim.avg:.6f} dB | "
         f"LPIPS: {lpips.avg:.6f}"
 
     )

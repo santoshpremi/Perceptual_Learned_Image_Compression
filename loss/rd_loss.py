@@ -4,7 +4,15 @@ import torch.nn as nn
 from pytorch_msssim import ms_ssim
 from loss import perceptual_loss as ps
 
-from models.vgg import Vgg16 
+from models.vgg import Vgg16
+
+# Add imports for DISTS and PIEAPP
+try:
+    from piq import DISTS, PieAPP
+    PIQ_AVAILABLE = True
+except ImportError:
+    print("Warning: piq library not found. Install with: pip install piq")
+    PIQ_AVAILABLE = False 
 
 class RateDistortionLoss(nn.Module):
     """Custom rate distortion loss with a Lagrangian parameter."""
@@ -145,42 +153,126 @@ class StyleLoss(nn.Module):
         return self.loss 
 
 class RateDistortionPOELICLoss(nn.Module):
-    """Custom rate distortion loss with a Lagrangian parameter."""
+    """Phase 1 loss: Rate-Distortion optimized loss (replaces Charbonnier with better RD loss).
+    
+    Uses MSE/MS-SSIM based rate-distortion loss instead of Charbonnier for better compression performance.
+    """
 
-    def __init__(self, lmbda=1e-2, device = "cuda", gpu_id=None):
+    def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None, metrics='mse'):
         super().__init__()
-        self.charbonnier = CharbonnierLoss()
-        self.gan = GANLoss()
+        # Use MSE or MS-SSIM for rate-distortion loss
+        self.mse = nn.MSELoss()
         self.style = StyleLoss()
-        self.lpips =  ps.PerceptualLoss(model='net-lin', net='vgg',
-                               use_gpu=torch.cuda.is_available(),gpu_ids=gpu_id)
+        self.lpips = ps.PerceptualLoss(model='net-lin', net='vgg',
+                               use_gpu=torch.cuda.is_available(), gpu_ids=gpu_id)
         print(gpu_id)
         self.lmbda = lmbda
+        self.metrics = metrics
         self.vgg = Vgg16().to(device).eval()
-
 
     def forward(self, output, target):
         N, _, H, W = target.size()
         out = {}
         num_pixels = N * H * W
+        
+        # Compute BPP loss
         out["bpp_loss"] = sum(
             (torch.log(likelihoods).sum() / (-math.log(2) * num_pixels))
             for likelihoods in output["likelihoods"].values()
         )
     
-        x_hat_feat  = self.vgg(output["x_hat"])
+        x_hat_feat = self.vgg(output["x_hat"])
         target_feat = self.vgg(target)
 
-        out["charbonnier"] = self.charbonnier(output["x_hat"], target)
-        out["lpips"]       = self.lpips(output["x_hat"], target).mean()
-        x_hat_feat  = [feat for feat in  x_hat_feat]
-        target_feat = [feat for feat in  target_feat]
+        # Use rate-distortion loss instead of Charbonnier
+        if self.metrics == 'mse':
+            out["rd_loss"] = self.mse(output["x_hat"], target)
+            out["charbonnier"] = None  # Keep for backward compatibility but set to None
+        elif self.metrics == 'ms-ssim':
+            out["rd_loss"] = 1 - ms_ssim(output["x_hat"], target, data_range=1.0)
+            out["charbonnier"] = None
+        else:
+            # Fallback to MSE if unknown metric
+            out["rd_loss"] = self.mse(output["x_hat"], target)
+            out["charbonnier"] = None
+        
+        out["lpips"] = self.lpips(output["x_hat"], target).mean()
+        
+        x_hat_feat = [feat for feat in x_hat_feat]
+        target_feat = [feat for feat in target_feat]
         style_loss = 0.0
         for i in range(4):
             style_loss += self.style(x_hat_feat[i], target_feat[i])
-        out["style_loss"]  = style_loss / 4.0
+        out["style_loss"] = style_loss / 4.0
 
-        out["loss"] = out["charbonnier"] + out["lpips"] +out["style_loss"] 
+        return out
+
+
+class RateDistortionPOELICLossPhase2(nn.Module):
+    """Phase 2 loss: Enhanced perceptual loss with DISTS and PIEAPP.
+    
+    Adds DISTS and PIEAPP perceptual losses for better human-perceived quality.
+    """
+
+    def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None):
+        super().__init__()
+        self.charbonnier = CharbonnierLoss()
+        self.gan = GANLoss()
+        self.style = StyleLoss()
+        self.lpips = ps.PerceptualLoss(model='net-lin', net='vgg',
+                               use_gpu=torch.cuda.is_available(), gpu_ids=gpu_id)
+        
+        # Add DISTS and PIEAPP if available
+        if PIQ_AVAILABLE:
+            self.dists = DISTS().to(device).eval()
+            self.pieapp = PieAPP().to(device).eval()
+            print("DISTS and PIEAPP losses initialized successfully")
+        else:
+            self.dists = None
+            self.pieapp = None
+            print("Warning: DISTS and PIEAPP not available. Install piq library.")
+        
+        print(gpu_id)
+        self.lmbda = lmbda
+        self.vgg = Vgg16().to(device).eval()
+
+    def forward(self, output, target):
+        N, _, H, W = target.size()
+        out = {}
+        num_pixels = N * H * W
+        
+        out["bpp_loss"] = sum(
+            (torch.log(likelihoods).sum() / (-math.log(2) * num_pixels))
+            for likelihoods in output["likelihoods"].values()
+        )
+    
+        x_hat_feat = self.vgg(output["x_hat"])
+        target_feat = self.vgg(target)
+
+        out["charbonnier"] = self.charbonnier(output["x_hat"], target)
+        out["lpips"] = self.lpips(output["x_hat"], target).mean()
+        
+        # Add DISTS loss
+        if self.dists is not None:
+            # DISTS expects images in [0, 1] range
+            out["dists"] = self.dists(output["x_hat"], target)
+        else:
+            out["dists"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
+        
+        # Add PIEAPP loss
+        if self.pieapp is not None:
+            # PIEAPP expects images in [0, 1] range
+            out["pieapp"] = self.pieapp(output["x_hat"], target)
+        else:
+            out["pieapp"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
+        
+        x_hat_feat = [feat for feat in x_hat_feat]
+        target_feat = [feat for feat in target_feat]
+        style_loss = 0.0
+        for i in range(4):
+            style_loss += self.style(x_hat_feat[i], target_feat[i])
+        out["style_loss"] = style_loss / 4.0
+
         return out
 
 class RateDistortionPOELICFaceLoss(nn.Module):
