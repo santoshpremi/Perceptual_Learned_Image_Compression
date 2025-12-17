@@ -125,7 +125,9 @@ def main():
     lr_scheduler_D = optim.lr_scheduler.MultiStepLR(optimizer_D, milestones=[80, 100], gamma=0.1)
 
     # Phase 2 loss: Enhanced perceptual loss with DISTS and PIEAPP
-    criterion = RateDistortionPOELICLossPhase2(lmbda=args.lmbda, device=device, gpu_id=args.gpu_id)
+    # Use Rate-Distortion (MSE/MS-SSIM) instead of Charbonnier for consistency with Phase 1
+    # Use metrics='mse' for MSE-based or 'ms-ssim' for MS-SSIM based rate-distortion
+    criterion = RateDistortionPOELICLossPhase2(lmbda=args.lmbda, device=device, gpu_id=args.gpu_id, metrics='mse')
     
     if args.checkpoint != None:
         checkpoint = torch.load(args.checkpoint)

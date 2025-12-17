@@ -32,9 +32,9 @@ def train_one_epoch(
             else:
                 # Fallback to Charbonnier if RD loss not available
                 total_loss = (config.get("lambda_char", 2e-6) * out_criterion.get("charbonnier", 0) + 
-                             config["lambda_lpips"] * out_criterion["lpips"] + 
-                             config["lambda_style"] * out_criterion["style_loss"] + 
-                             config["lambda_rate"] * out_criterion["bpp_loss"])
+                         config["lambda_lpips"] * out_criterion["lpips"] + 
+                         config["lambda_style"] * out_criterion["style_loss"] + 
+                         config["lambda_rate"] * out_criterion["bpp_loss"])
         else:
             # Fallback to unweighted sum if config not provided
             if "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
@@ -44,9 +44,9 @@ def train_one_epoch(
                              out_criterion["bpp_loss"])
             else:
                 total_loss = (out_criterion.get("charbonnier", 0) + 
-                             out_criterion["lpips"] + 
-                             out_criterion["style_loss"] + 
-                             out_criterion["bpp_loss"])
+                         out_criterion["lpips"] + 
+                         out_criterion["style_loss"] + 
+                         out_criterion["bpp_loss"])
         out_criterion["loss"] = total_loss
         out_criterion["loss"].backward()
         if clip_max_norm > 0:
@@ -151,24 +151,44 @@ def train_one_epoch_gan(
         loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
 
         out_criterion = criterion(out_net, d)
-        # Phase 2: Include DISTS and PIEAPP losses
+        # Phase 2: Use Rate-Distortion loss (same as Phase 1) + DISTS and PIEAPP losses
         if config is not None:
-            loss_G_total = (config.get("lambda_char", 2e-6) * out_criterion.get("charbonnier", 0) + 
-                          config["lambda_lpips"] * out_criterion["lpips"] + 
-                          config["lambda_style"] * out_criterion["style_loss"] + 
-                          config["lambda_gan"] * loss_G_fake + 
-                          config["lambda_rate"] * out_criterion["bpp_loss"] +
-                          config.get("lambda_dists", 0.5) * out_criterion.get("dists", 0) +
-                          config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))
+            # Check if using new RD loss or old Charbonnier (for backward compatibility)
+            if "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
+                loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
+                              config["lambda_lpips"] * out_criterion["lpips"] + 
+                              config["lambda_style"] * out_criterion["style_loss"] + 
+                              config["lambda_gan"] * loss_G_fake + 
+                              config["lambda_rate"] * out_criterion["bpp_loss"] +
+                              config.get("lambda_dists", 0.5) * out_criterion.get("dists", 0) +
+                              config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))
+            else:
+                # Fallback to Charbonnier if RD loss not available (backward compatibility)
+                loss_G_total = (config.get("lambda_char", 2e-6) * out_criterion.get("charbonnier", 0) + 
+                              config["lambda_lpips"] * out_criterion["lpips"] + 
+                              config["lambda_style"] * out_criterion["style_loss"] + 
+                              config["lambda_gan"] * loss_G_fake + 
+                              config["lambda_rate"] * out_criterion["bpp_loss"] +
+                              config.get("lambda_dists", 0.5) * out_criterion.get("dists", 0) +
+                              config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))
         else:
             # Default hardcoded values (for backward compatibility)
-            loss_G_total = (3e-4 * out_criterion.get("charbonnier", 0) + 
-                          2 * out_criterion["lpips"] + 
-                          out_criterion["style_loss"] + 
-                          loss_G_fake + 
-                          out_criterion["bpp_loss"] +
-                          0.5 * out_criterion.get("dists", 0) +
-                          0.3 * out_criterion.get("pieapp", 0))
+            if "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
+                loss_G_total = (out_criterion["rd_loss"] + 
+                              2 * out_criterion["lpips"] + 
+                              out_criterion["style_loss"] + 
+                              loss_G_fake + 
+                              out_criterion["bpp_loss"] +
+                              0.5 * out_criterion.get("dists", 0) +
+                              0.3 * out_criterion.get("pieapp", 0))
+            else:
+                loss_G_total = (3e-4 * out_criterion.get("charbonnier", 0) + 
+                              2 * out_criterion["lpips"] + 
+                              out_criterion["style_loss"] + 
+                              loss_G_fake + 
+                              out_criterion["bpp_loss"] +
+                              0.5 * out_criterion.get("dists", 0) +
+                              0.3 * out_criterion.get("pieapp", 0))
         loss_G_total.backward()
 
         if clip_max_norm > 0:
@@ -186,6 +206,8 @@ def train_one_epoch_gan(
             tb_logger.add_scalar('{}'.format('[train]: bpp_loss'), out_criterion["bpp_loss"].item(), current_step)
             tb_logger.add_scalar('{}'.format('[train]: lr'), optimizer.param_groups[0]['lr'], current_step)
             tb_logger.add_scalar('{}'.format('[train]: aux_loss'), aux_loss.item(), current_step)
+            if out_criterion.get("rd_loss") is not None:
+                tb_logger.add_scalar('{}'.format('[train]: rd_loss'), out_criterion["rd_loss"].item(), current_step)
             if out_criterion.get("dists") is not None and isinstance(out_criterion["dists"], torch.Tensor):
                 tb_logger.add_scalar('{}'.format('[train]: dists_loss'), out_criterion["dists"].item(), current_step)
             if out_criterion.get("pieapp") is not None and isinstance(out_criterion["pieapp"], torch.Tensor):
@@ -193,8 +215,15 @@ def train_one_epoch_gan(
           
         # print(out_criterion["loss"].size(),out_criterion["charbonnier"].size(),out_criterion["lpips"].size(),out_criterion["style_loss"].size())
         if i % 100 == 0:
-                charbonnier_val = out_criterion.get("charbonnier", 0)
-                charbonnier_str = f'{charbonnier_val.item():.4f}' if isinstance(charbonnier_val, torch.Tensor) else '0.0000'
+                # Check if using RD loss or Charbonnier
+                if "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
+                    rd_str = f'{out_criterion["rd_loss"].item():.4f}'
+                    charbonnier_str = "N/A"
+                else:
+                    rd_str = "N/A"
+                    charbonnier_val = out_criterion.get("charbonnier", 0)
+                    charbonnier_str = f'{charbonnier_val.item():.4f}' if isinstance(charbonnier_val, torch.Tensor) else '0.0000'
+                
                 dists_val = out_criterion.get("dists", 0)
                 dists_str = f'{dists_val.item():.4f}' if isinstance(dists_val, torch.Tensor) else '0.0000'
                 pieapp_val = out_criterion.get("pieapp", 0)
@@ -205,6 +234,7 @@ def train_one_epoch_gan(
                     f"{i*len(d):5d}/{len(train_dataloader.dataset)}"
                     f" ({100. * i / len(train_dataloader):.0f}%)] "
                     f'Loss: {loss_G_total.item():.4f} | '
+                    f'RD loss: {rd_str} | '
                     f'Charbonnier loss: {charbonnier_str} | '
                     f'LPIPS loss: {out_criterion["lpips"].item():.4f} | '
                     f'Style loss: {out_criterion["style_loss"].item():.4f} | '

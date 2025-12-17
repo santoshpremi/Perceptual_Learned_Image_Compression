@@ -127,17 +127,17 @@ def test_one_epoch(epoch, test_dataloader, model, criterion, save_dir, logger_va
         tb_logger.add_scalar('{}'.format('[val]: style loss'), style_loss.avg, epoch + 1)
         if charbonnier.count > 0:
             tb_logger.add_scalar('{}'.format('[val]: charbonnier loss'), charbonnier.avg, epoch + 1)
-            logger_val.info(
-                f"Test epoch {epoch}: Average losses: "
-                f"Loss: {loss.avg:.4f} | "
-                f"Charbonnier loss: {charbonnier.avg:.4f} | "
-                f"LPIPS loss: {lpips.avg:.4f} | "
-                f"Style loss: {style_loss.avg:.4f} | "
-                f"Bpp loss: {bpp_loss.avg:.4f} | "
-                f"Aux loss: {aux_loss.avg:.2f} | "
-                f"PSNR: {psnr.avg:.6f} dB | "
-                f"MS-SSIM: {ms_ssim.avg:.6f} dB"
-            )
+        logger_val.info(
+            f"Test epoch {epoch}: Average losses: "
+            f"Loss: {loss.avg:.4f} | "
+            f"Charbonnier loss: {charbonnier.avg:.4f} | "
+            f"LPIPS loss: {lpips.avg:.4f} | "
+            f"Style loss: {style_loss.avg:.4f} | "
+            f"Bpp loss: {bpp_loss.avg:.4f} | "
+            f"Aux loss: {aux_loss.avg:.2f} | "
+            f"PSNR: {psnr.avg:.6f} dB | "
+            f"MS-SSIM: {ms_ssim.avg:.6f} dB"
+        )
         else:
             # RD loss case
             logger_val.info(
@@ -315,6 +315,7 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     loss = AverageMeter()
     bpp_loss = AverageMeter()
     charbonnier = AverageMeter()
+    rd_loss = AverageMeter()
     lpips = AverageMeter()
     style_loss = AverageMeter() 
     adv_loss = AverageMeter() 
@@ -355,24 +356,44 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
 
             pred_fake = model_disc(out_net["x_hat"])
             loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
-            # Phase 2: Include DISTS and PIEAPP losses
+            # Phase 2: Use Rate-Distortion loss (same as Phase 1) + DISTS and PIEAPP losses
             if config is not None:
-                loss_G_total = (config.get("lambda_char", 2e-6) * out_criterion.get("charbonnier", 0) + 
-                              config["lambda_lpips"] * out_criterion["lpips"] + 
-                              config["lambda_style"] * out_criterion["style_loss"] + 
-                              config["lambda_gan"] * loss_G_fake + 
-                              config["lambda_rate"] * out_criterion["bpp_loss"] +
-                              config.get("lambda_dists", 0.5) * out_criterion.get("dists", 0) +
-                              config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))
+                # Check if using new RD loss or old Charbonnier (for backward compatibility)
+                if "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
+                    loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
+                                  config["lambda_lpips"] * out_criterion["lpips"] + 
+                                  config["lambda_style"] * out_criterion["style_loss"] + 
+                                  config["lambda_gan"] * loss_G_fake + 
+                                  config["lambda_rate"] * out_criterion["bpp_loss"] +
+                                  config.get("lambda_dists", 0.5) * out_criterion.get("dists", 0) +
+                                  config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))
+                else:
+                    # Fallback to Charbonnier if RD loss not available (backward compatibility)
+                    loss_G_total = (config.get("lambda_char", 2e-6) * out_criterion.get("charbonnier", 0) + 
+                                  config["lambda_lpips"] * out_criterion["lpips"] + 
+                                  config["lambda_style"] * out_criterion["style_loss"] + 
+                                  config["lambda_gan"] * loss_G_fake + 
+                                  config["lambda_rate"] * out_criterion["bpp_loss"] +
+                                  config.get("lambda_dists", 0.5) * out_criterion.get("dists", 0) +
+                                  config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))
             else:
                 # Default hardcoded values (for backward compatibility)
-                loss_G_total = (3e-4 * out_criterion.get("charbonnier", 0) + 
-                              2 * out_criterion["lpips"] + 
-                              out_criterion["style_loss"] + 
-                              loss_G_fake + 
-                              out_criterion["bpp_loss"] +
-                              0.5 * out_criterion.get("dists", 0) +
-                              0.3 * out_criterion.get("pieapp", 0))
+                if "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
+                    loss_G_total = (out_criterion["rd_loss"] + 
+                                  2 * out_criterion["lpips"] + 
+                                  out_criterion["style_loss"] + 
+                                  loss_G_fake + 
+                                  out_criterion["bpp_loss"] +
+                                  0.5 * out_criterion.get("dists", 0) +
+                                  0.3 * out_criterion.get("pieapp", 0))
+                else:
+                    loss_G_total = (3e-4 * out_criterion.get("charbonnier", 0) + 
+                                  2 * out_criterion["lpips"] + 
+                                  out_criterion["style_loss"] + 
+                                  loss_G_fake + 
+                                  out_criterion["bpp_loss"] +
+                                  0.5 * out_criterion.get("dists", 0) +
+                                  0.3 * out_criterion.get("pieapp", 0))
 
             aux_loss.update(model.aux_loss())
             bpp_loss.update(out_criterion["bpp_loss"].item())
@@ -380,7 +401,10 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
             lpips.update(out_criterion["lpips"].item())
             style_loss.update(out_criterion["style_loss"].item())
             adv_loss.update(loss_G_fake.item())
-            if out_criterion.get("charbonnier") is not None:
+            # Track RD loss if available, otherwise Charbonnier
+            if out_criterion.get("rd_loss") is not None:
+                rd_loss.update(out_criterion["rd_loss"].item())
+            elif out_criterion.get("charbonnier") is not None:
                 charbonnier.update(out_criterion["charbonnier"].item())
             if out_criterion.get("dists") is not None:
                 dists_val = out_criterion["dists"]
@@ -408,6 +432,8 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     tb_logger.add_scalar('{}'.format('[val]: ms-ssim'), ms_ssim.avg, epoch + 1)
     tb_logger.add_scalar('{}'.format('[val]: lpips'), lpips.avg, epoch + 1)
     tb_logger.add_scalar('{}'.format('[val]: style loss'), style_loss.avg, epoch + 1)
+    if rd_loss.count > 0:
+        tb_logger.add_scalar('{}'.format('[val]: rd_loss'), rd_loss.avg, epoch + 1)
     if charbonnier.count > 0:
         tb_logger.add_scalar('{}'.format('[val]: charbonnier loss'), charbonnier.avg, epoch + 1)
     if dists.count > 0:
@@ -415,6 +441,7 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     if pieapp.count > 0:
         tb_logger.add_scalar('{}'.format('[val]: pieapp loss'), pieapp.avg, epoch + 1)
     
+    rd_str = f"{rd_loss.avg:.4f}" if rd_loss.count > 0 else "N/A"
     charbonnier_str = f"{charbonnier.avg:.4f}" if charbonnier.count > 0 else "N/A"
     dists_str = f"{dists.avg:.4f}" if dists.count > 0 else "N/A"
     pieapp_str = f"{pieapp.avg:.4f}" if pieapp.count > 0 else "N/A"
@@ -422,6 +449,7 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     logger_val.info(
         f"Test epoch {epoch}: Average losses: "
         f"Loss: {loss.avg:.4f} | "
+        f"RD loss: {rd_str} | "
         f"Charbonnier loss: {charbonnier_str} | "
         f"LPIPS loss: {lpips.avg:.4f} | "
         f"Style loss: {style_loss.avg:.4f} | "

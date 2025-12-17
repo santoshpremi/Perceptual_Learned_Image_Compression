@@ -4,7 +4,7 @@ import torch.nn as nn
 from pytorch_msssim import ms_ssim
 from loss import perceptual_loss as ps
 
-from models.vgg import Vgg16
+from models.vgg import Vgg16 
 
 # Add imports for DISTS and PIEAPP
 try:
@@ -211,12 +211,14 @@ class RateDistortionPOELICLoss(nn.Module):
 class RateDistortionPOELICLossPhase2(nn.Module):
     """Phase 2 loss: Enhanced perceptual loss with DISTS and PIEAPP.
     
+    Uses Rate-Distortion (MSE/MS-SSIM) loss instead of Charbonnier for consistency with Phase 1.
     Adds DISTS and PIEAPP perceptual losses for better human-perceived quality.
     """
 
-    def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None):
+    def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None, metrics='mse'):
         super().__init__()
-        self.charbonnier = CharbonnierLoss()
+        # Use MSE or MS-SSIM for rate-distortion loss (same as Phase 1)
+        self.mse = nn.MSELoss()
         self.gan = GANLoss()
         self.style = StyleLoss()
         self.lpips = ps.PerceptualLoss(model='net-lin', net='vgg',
@@ -234,6 +236,7 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         
         print(gpu_id)
         self.lmbda = lmbda
+        self.metrics = metrics
         self.vgg = Vgg16().to(device).eval()
 
     def forward(self, output, target):
@@ -249,7 +252,18 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         x_hat_feat = self.vgg(output["x_hat"])
         target_feat = self.vgg(target)
 
-        out["charbonnier"] = self.charbonnier(output["x_hat"], target)
+        # Use rate-distortion loss instead of Charbonnier (same as Phase 1)
+        if self.metrics == 'mse':
+            out["rd_loss"] = self.mse(output["x_hat"], target)
+            out["charbonnier"] = None  # Keep for backward compatibility but set to None
+        elif self.metrics == 'ms-ssim':
+            out["rd_loss"] = 1 - ms_ssim(output["x_hat"], target, data_range=1.0)
+            out["charbonnier"] = None
+        else:
+            # Fallback to MSE if unknown metric
+            out["rd_loss"] = self.mse(output["x_hat"], target)
+            out["charbonnier"] = None
+        
         out["lpips"] = self.lpips(output["x_hat"], target).mean()
         
         # Add DISTS loss
