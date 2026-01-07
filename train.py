@@ -79,7 +79,7 @@ def main():
         [transforms.RandomCrop(args.patch_size), transforms.ToTensor()]
     )
     test_transforms = transforms.Compose(
-        [transforms.ToTensor()]
+        [transforms.CenterCrop(args.patch_size), transforms.ToTensor()]
     )
 
     train_dataset = OpenImagesDataset(
