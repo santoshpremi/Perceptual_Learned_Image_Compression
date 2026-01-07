@@ -127,17 +127,17 @@ def test_one_epoch(epoch, test_dataloader, model, criterion, save_dir, logger_va
         tb_logger.add_scalar('{}'.format('[val]: style loss'), style_loss.avg, epoch + 1)
         if charbonnier.count > 0:
             tb_logger.add_scalar('{}'.format('[val]: charbonnier loss'), charbonnier.avg, epoch + 1)
-        logger_val.info(
-            f"Test epoch {epoch}: Average losses: "
-            f"Loss: {loss.avg:.4f} | "
-            f"Charbonnier loss: {charbonnier.avg:.4f} | "
-            f"LPIPS loss: {lpips.avg:.4f} | "
-            f"Style loss: {style_loss.avg:.4f} | "
-            f"Bpp loss: {bpp_loss.avg:.4f} | "
-            f"Aux loss: {aux_loss.avg:.2f} | "
-            f"PSNR: {psnr.avg:.6f} dB | "
-            f"MS-SSIM: {ms_ssim.avg:.6f} dB"
-        )
+            logger_val.info(
+                f"Test epoch {epoch}: Average losses: "
+                f"Loss: {loss.avg:.4f} | "
+                f"Charbonnier loss: {charbonnier.avg:.4f} | "
+                f"LPIPS loss: {lpips.avg:.4f} | "
+                f"Style loss: {style_loss.avg:.4f} | "
+                f"Bpp loss: {bpp_loss.avg:.4f} | "
+                f"Aux loss: {aux_loss.avg:.2f} | "
+                f"PSNR: {psnr.avg:.6f} dB | "
+                f"MS-SSIM: {ms_ssim.avg:.6f} dB"
+            )
         else:
             # RD loss case
             logger_val.info(
