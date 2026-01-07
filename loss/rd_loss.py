@@ -268,15 +268,19 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         
         # Add DISTS loss
         if self.dists is not None:
-            # DISTS expects images in [0, 1] range
-            out["dists"] = self.dists(output["x_hat"], target)
+            # DISTS expects images in [0, 1] range - clamp to ensure valid range
+            x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
+            target_clamped = torch.clamp(target, 0.0, 1.0)
+            out["dists"] = self.dists(x_hat_clamped, target_clamped)
         else:
             out["dists"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
-        
+
         # Add PIEAPP loss
         if self.pieapp is not None:
-            # PIEAPP expects images in [0, 1] range
-            out["pieapp"] = self.pieapp(output["x_hat"], target)
+            # PIEAPP expects images in [0, 1] range - clamp to ensure valid range
+            x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
+            target_clamped = torch.clamp(target, 0.0, 1.0)
+            out["pieapp"] = self.pieapp(x_hat_clamped, target_clamped)
         else:
             out["pieapp"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
         
