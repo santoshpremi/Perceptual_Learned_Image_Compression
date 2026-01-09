@@ -1,6 +1,7 @@
 import os
 import random
 import logging
+import gc
 from PIL import ImageFile, Image
 import math
 import torch
@@ -170,6 +171,10 @@ def main():
             current_step,
             config
         )
+
+        # Clear memory before validation
+        torch.cuda.empty_cache()
+        gc.collect()
 
         save_dir = os.path.join('./experiments', args.experiment, 'val_images', '%03d' % (epoch + 1))
         loss = test_one_epoch(epoch, test_dataloader, net, criterion, save_dir, logger_val, tb_logger, config)

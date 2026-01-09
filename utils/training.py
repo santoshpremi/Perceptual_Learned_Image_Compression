@@ -72,7 +72,7 @@ def train_one_epoch(
             # For Phase 1 training with perceptual losses
             if "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
                 logger_train.info(
-                    f"Train epoch {epoch}: ["
+                    f"Train epoch {epoch + 1}: ["
                     f"{i*len(d):5d}/{len(train_dataloader.dataset)}"
                     f" ({100. * i / len(train_dataloader):.0f}%)] "
                     f'Loss: {out_criterion["loss"].item():.4f} | '
@@ -84,7 +84,7 @@ def train_one_epoch(
                 )
             elif "charbonnier" in out_criterion and out_criterion.get("charbonnier") is not None:
                 logger_train.info(
-                    f"Train epoch {epoch}: ["
+                    f"Train epoch {epoch + 1}: ["
                     f"{i*len(d):5d}/{len(train_dataloader.dataset)}"
                     f" ({100. * i / len(train_dataloader):.0f}%)] "
                     f'Loss: {out_criterion["loss"].item():.4f} | '
@@ -98,7 +98,7 @@ def train_one_epoch(
                 mse_val = out_criterion.get("mse_loss")
                 mse_str = f'{mse_val.item():.4f}' if mse_val is not None else 'N/A'
                 logger_train.info(
-                    f"Train epoch {epoch}: ["
+                    f"Train epoch {epoch + 1}: ["
                     f"{i*len(d):5d}/{len(train_dataloader.dataset)}"
                     f" ({100. * i / len(train_dataloader):.0f}%)] "
                     f'Loss: {out_criterion["loss"].item():.4f} | '
@@ -108,7 +108,7 @@ def train_one_epoch(
                 )
             else:
                 logger_train.info(
-                    f"Train epoch {epoch}: ["
+                    f"Train epoch {epoch + 1}: ["
                     f"{i*len(d):5d}/{len(train_dataloader.dataset)}"
                     f" ({100. * i / len(train_dataloader):.0f}%)] "
                     f'Loss: {out_criterion["loss"].item():.4f} | '
@@ -230,7 +230,7 @@ def train_one_epoch_gan(
                 pieapp_str = f'{pieapp_val.item():.4f}' if isinstance(pieapp_val, torch.Tensor) else '0.0000'
                 
                 logger_train.info(
-                    f"Train epoch {epoch}: ["
+                    f"Train epoch {epoch + 1}: ["
                     f"{i*len(d):5d}/{len(train_dataloader.dataset)}"
                     f" ({100. * i / len(train_dataloader):.0f}%)] "
                     f'Loss: {loss_G_total.item():.4f} | '
@@ -307,7 +307,7 @@ def train_one_epoch_gan_face(
         # print(out_criterion["loss"].size(),out_criterion["charbonnier"].size(),out_criterion["lpips"].size(),out_criterion["style_loss"].size())
         if i % 100 == 0:
                 logger_train.info(
-                    f"Train epoch {epoch}: ["
+                    f"Train epoch {epoch + 1}: ["
                     f"{i*len(d):5d}/{len(train_dataloader.dataset)}"
                     f" ({100. * i / len(train_dataloader):.0f}%)] "
                     f'Loss: {out_criterion["loss"].item():.4f} | '

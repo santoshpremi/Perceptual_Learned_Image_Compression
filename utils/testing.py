@@ -128,7 +128,7 @@ def test_one_epoch(epoch, test_dataloader, model, criterion, save_dir, logger_va
         if charbonnier.count > 0:
             tb_logger.add_scalar('{}'.format('[val]: charbonnier loss'), charbonnier.avg, epoch + 1)
             logger_val.info(
-                f"Test epoch {epoch}: Average losses: "
+                f"Test epoch {epoch + 1}: Average losses: "
                 f"Loss: {loss.avg:.4f} | "
                 f"Charbonnier loss: {charbonnier.avg:.4f} | "
                 f"LPIPS loss: {lpips.avg:.4f} | "
@@ -141,7 +141,7 @@ def test_one_epoch(epoch, test_dataloader, model, criterion, save_dir, logger_va
         else:
             # RD loss case
             logger_val.info(
-                f"Test epoch {epoch}: Average losses: "
+                f"Test epoch {epoch + 1}: Average losses: "
                 f"Loss: {loss.avg:.4f} | "
                 f"LPIPS loss: {lpips.avg:.4f} | "
                 f"Style loss: {style_loss.avg:.4f} | "
@@ -152,7 +152,7 @@ def test_one_epoch(epoch, test_dataloader, model, criterion, save_dir, logger_va
             )
     elif mse_loss.count > 0:
         logger_val.info(
-            f"Test epoch {epoch}: Average losses: "
+            f"Test epoch {epoch + 1}: Average losses: "
             f"Loss: {loss.avg:.4f} | "
             f"MSE loss: {mse_loss.avg:.4f} | "
             f"Bpp loss: {bpp_loss.avg:.4f} | "
@@ -163,7 +163,7 @@ def test_one_epoch(epoch, test_dataloader, model, criterion, save_dir, logger_va
         tb_logger.add_scalar('{}'.format('[val]: mse_loss'), mse_loss.avg, epoch + 1)
     elif ms_ssim_loss.count > 0:
         logger_val.info(
-            f"Test epoch {epoch}: Average losses: "
+            f"Test epoch {epoch + 1}: Average losses: "
             f"Loss: {loss.avg:.4f} | "
             f"MS-SSIM loss: {ms_ssim_loss.avg:.4f} | "
             f"Bpp loss: {bpp_loss.avg:.4f} | "
@@ -292,7 +292,7 @@ def test_model(test_dataloader, net, logger_test, save_dir, epoch, gpu_id):
                 f"Entropy dec Time: {dec_entropy_time:.4f} | "
             )
     logger_test.info(
-        f"Epoch:[{epoch}] | "
+        f"Epoch:[{epoch + 1}] | "
         f"Avg Bpp: {avg_bpp.avg:.4f} | "
         f"Avg PSNR: {avg_psnr.avg:.4f} dB | "
         f"Avg MS-SSIM: {avg_ms_ssim.avg:.4f} dB | "
@@ -447,7 +447,7 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     pieapp_str = f"{pieapp.avg:.4f}" if pieapp.count > 0 else "N/A"
     
     logger_val.info(
-        f"Test epoch {epoch}: Average losses: "
+        f"Test epoch {epoch + 1}: Average losses: "
         f"Loss: {loss.avg:.4f} | "
         f"RD loss: {rd_str} | "
         f"Charbonnier loss: {charbonnier_str} | "
@@ -550,7 +550,7 @@ def test_one_epoch_gan_face(epoch, test_dataloader, model, model_disc,criterion,
     tb_logger.add_scalar('{}'.format('[val]: face loss'), face_loss.avg, epoch + 1)
 
     logger_val.info(
-        f"Test epoch {epoch}: Average losses: "
+        f"Test epoch {epoch + 1}: Average losses: "
         f"Loss: {loss.avg:.4f} | "
         f"Charbonnier loss: {charbonnier.avg:.4f} | "
         f"Style loss: {style_loss.avg:.4f} | "
