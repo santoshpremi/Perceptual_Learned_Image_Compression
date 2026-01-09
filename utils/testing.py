@@ -58,21 +58,9 @@ def test_one_epoch(epoch, test_dataloader, model, criterion, save_dir, logger_va
             bpp_loss.update(out_criterion["bpp_loss"])
             # Phase 1: compute total loss if not already computed, using config lambda weights
             if "loss" not in out_criterion or out_criterion.get("loss") is None:
-                # Check if using new RD loss or old Charbonnier
-                if "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
-                    if config is not None:
-                        # Use config lambda values for proper loss weighting (consistent with training)
-                        out_criterion["loss"] = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
-                                               config["lambda_lpips"] * out_criterion["lpips"] + 
-                                               config["lambda_style"] * out_criterion["style_loss"] + 
-                                               config["lambda_rate"] * out_criterion["bpp_loss"])
-                    else:
-                        # Fallback to unweighted sum if config not provided
-                        out_criterion["loss"] = (out_criterion["rd_loss"] + 
-                                               out_criterion["lpips"] + 
-                                               out_criterion["style_loss"] + 
-                                               out_criterion["bpp_loss"])
-                elif "charbonnier" in out_criterion and out_criterion.get("charbonnier") is not None:
+                # Check if using Charbonnier (original HFLIC) or RD loss (for backward compatibility)
+                if "charbonnier" in out_criterion and out_criterion.get("charbonnier") is not None:
+                    # Original HFLIC: Use Charbonnier loss
                     if config is not None:
                         # Use config lambda values for proper loss weighting (consistent with training)
                         out_criterion["loss"] = (config.get("lambda_char", 2e-6) * out_criterion["charbonnier"] + 
@@ -82,6 +70,20 @@ def test_one_epoch(epoch, test_dataloader, model, criterion, save_dir, logger_va
                     else:
                         # Fallback to unweighted sum if config not provided
                         out_criterion["loss"] = (out_criterion["charbonnier"] + 
+                                               out_criterion["lpips"] + 
+                                               out_criterion["style_loss"] + 
+                                               out_criterion["bpp_loss"])
+                elif "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
+                    # Fallback to RD loss if Charbonnier not available (backward compatibility)
+                    if config is not None:
+                        # Use config lambda values for proper loss weighting (consistent with training)
+                        out_criterion["loss"] = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
+                                               config["lambda_lpips"] * out_criterion["lpips"] + 
+                                               config["lambda_style"] * out_criterion["style_loss"] + 
+                                               config["lambda_rate"] * out_criterion["bpp_loss"])
+                    else:
+                        # Fallback to unweighted sum if config not provided
+                        out_criterion["loss"] = (out_criterion["rd_loss"] + 
                                                out_criterion["lpips"] + 
                                                out_criterion["style_loss"] + 
                                                out_criterion["bpp_loss"])

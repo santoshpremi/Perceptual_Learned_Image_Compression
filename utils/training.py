@@ -20,33 +20,36 @@ def train_one_epoch(
         out_net = model(d)
 
         out_criterion = criterion(out_net, d)
-        # Phase 1: Use Rate-Distortion loss instead of Charbonnier
-        # Total loss = lambda_rd * RD_loss + lambda_lpips * LPIPS + lambda_style * Style + lambda_rate * Rate (BPP)
+        # Phase 1: Original HFLIC - Charbonnier + LPIPS + Style + Rate (BPP)
+        # Total loss = lambda_char * Charbonnier + lambda_lpips * LPIPS + lambda_style * Style + lambda_rate * Rate (BPP)
         if config is not None:
-            # Check if using new RD loss or old Charbonnier
-            if "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
+            # Check if using Charbonnier (original HFLIC) or RD loss (for backward compatibility)
+            if "charbonnier" in out_criterion and out_criterion.get("charbonnier") is not None:
+                # Original HFLIC: Use Charbonnier loss
+                total_loss = (config.get("lambda_char", 2e-6) * out_criterion["charbonnier"] + 
+                         config["lambda_lpips"] * out_criterion["lpips"] + 
+                         config["lambda_style"] * out_criterion["style_loss"] + 
+                         config["lambda_rate"] * out_criterion["bpp_loss"])
+            elif "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
+                # Fallback to RD loss if Charbonnier not available (backward compatibility)
                 total_loss = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
                              config["lambda_lpips"] * out_criterion["lpips"] + 
                              config["lambda_style"] * out_criterion["style_loss"] + 
                              config["lambda_rate"] * out_criterion["bpp_loss"])
-            else:
-                # Fallback to Charbonnier if RD loss not available
-                total_loss = (config.get("lambda_char", 2e-6) * out_criterion.get("charbonnier", 0) + 
-                         config["lambda_lpips"] * out_criterion["lpips"] + 
-                         config["lambda_style"] * out_criterion["style_loss"] + 
-                         config["lambda_rate"] * out_criterion["bpp_loss"])
         else:
             # Fallback to unweighted sum if config not provided
-            if "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
+            if "charbonnier" in out_criterion and out_criterion.get("charbonnier") is not None:
+                # Original HFLIC: Use Charbonnier loss
+                total_loss = (out_criterion["charbonnier"] + 
+                         out_criterion["lpips"] + 
+                         out_criterion["style_loss"] + 
+                         out_criterion["bpp_loss"])
+            elif "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
+                # Fallback to RD loss if Charbonnier not available
                 total_loss = (out_criterion["rd_loss"] + 
                              out_criterion["lpips"] + 
                              out_criterion["style_loss"] + 
                              out_criterion["bpp_loss"])
-            else:
-                total_loss = (out_criterion.get("charbonnier", 0) + 
-                         out_criterion["lpips"] + 
-                         out_criterion["style_loss"] + 
-                         out_criterion["bpp_loss"])
         out_criterion["loss"] = total_loss
         out_criterion["loss"].backward()
         if clip_max_norm > 0:

@@ -153,15 +153,15 @@ class StyleLoss(nn.Module):
         return self.loss 
 
 class RateDistortionPOELICLoss(nn.Module):
-    """Phase 1 loss: Rate-Distortion optimized loss (replaces Charbonnier with better RD loss).
+    """Phase 1 loss: Original HFLIC loss with Charbonnier.
     
-    Uses MSE/MS-SSIM based rate-distortion loss instead of Charbonnier for better compression performance.
+    Uses Charbonnier loss as in original HFLIC paper for exact reproduction.
     """
 
     def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None, metrics='mse'):
         super().__init__()
-        # Use MSE or MS-SSIM for rate-distortion loss
-        self.mse = nn.MSELoss()
+        # Use Charbonnier loss (original HFLIC)
+        self.charbonnier = CharbonnierLoss()
         self.style = StyleLoss()
         self.lpips = ps.PerceptualLoss(model='net-lin', net='vgg',
                                use_gpu=torch.cuda.is_available(), gpu_ids=gpu_id)
@@ -184,17 +184,9 @@ class RateDistortionPOELICLoss(nn.Module):
         x_hat_feat = self.vgg(output["x_hat"])
         target_feat = self.vgg(target)
 
-        # Use rate-distortion loss instead of Charbonnier
-        if self.metrics == 'mse':
-            out["rd_loss"] = self.mse(output["x_hat"], target)
-            out["charbonnier"] = None  # Keep for backward compatibility but set to None
-        elif self.metrics == 'ms-ssim':
-            out["rd_loss"] = 1 - ms_ssim(output["x_hat"], target, data_range=1.0)
-            out["charbonnier"] = None
-        else:
-            # Fallback to MSE if unknown metric
-            out["rd_loss"] = self.mse(output["x_hat"], target)
-            out["charbonnier"] = None
+        # Use Charbonnier loss (original HFLIC)
+        out["charbonnier"] = self.charbonnier(output["x_hat"], target)
+        out["rd_loss"] = None  # Not used in original HFLIC
         
         out["lpips"] = self.lpips(output["x_hat"], target).mean()
         

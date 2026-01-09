@@ -127,8 +127,7 @@ def main():
     optimizer, aux_optimizer = configure_optimizers(net, args)
     lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[80, 100], gamma=0.1)
 
-    # Phase 1 loss: Rate-Distortion + LPIPS + Style + Rate (NO GAN)
-    # Use metrics='mse' for MSE-based or 'ms-ssim' for MS-SSIM based rate-distortion
+    # Phase 1 loss: Original HFLIC - Charbonnier + LPIPS + Style + Rate (NO GAN)
     criterion = RateDistortionPOELICLoss(lmbda=args.lmbda, device=device, gpu_id=args.gpu_id, metrics='mse')
     
     if args.checkpoint != None:
@@ -149,8 +148,8 @@ def main():
         current_step = 0
 
     logger_train.info("=" * 80)
-    logger_train.info("PHASE 1 TRAINING: Training with Rate-Distortion loss (replaces Charbonnier)")
-    logger_train.info("Loss components: Rate-Distortion (MSE/MS-SSIM) + LPIPS + Style + Rate (BPP)")
+    logger_train.info("PHASE 1 TRAINING: Original HFLIC with Charbonnier loss")
+    logger_train.info("Loss components: Charbonnier + LPIPS + Style + Rate (BPP)")
     logger_train.info("=" * 80)
     logger_train.info(f"Seed: {seed}")
     logger_train.info(args)
