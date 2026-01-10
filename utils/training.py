@@ -155,6 +155,7 @@ def train_one_epoch_gan(
 
         out_criterion = criterion(out_net, d)
         # Phase 2: Use Rate-Distortion loss (same as Phase 1) + DISTS and PIEAPP losses
+        # Note: PIEAPP is currently disabled but can be restored later
         if config is not None:
             # Check if using new RD loss or old Charbonnier (for backward compatibility)
             if "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
@@ -164,7 +165,7 @@ def train_one_epoch_gan(
                               config["lambda_gan"] * loss_G_fake + 
                               config["lambda_rate"] * out_criterion["bpp_loss"] +
                               config.get("lambda_dists", 0.5) * out_criterion.get("dists", 0) +
-                              config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))
+                              config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))  # PIEAPP term kept but will be 0
             else:
                 # Fallback to Charbonnier if RD loss not available (backward compatibility)
                 loss_G_total = (config.get("lambda_char", 2e-6) * out_criterion.get("charbonnier", 0) + 
@@ -173,7 +174,7 @@ def train_one_epoch_gan(
                               config["lambda_gan"] * loss_G_fake + 
                               config["lambda_rate"] * out_criterion["bpp_loss"] +
                               config.get("lambda_dists", 0.5) * out_criterion.get("dists", 0) +
-                              config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))
+                              config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))  # PIEAPP term kept but will be 0
         else:
             # Default hardcoded values (for backward compatibility)
             if "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
@@ -183,7 +184,7 @@ def train_one_epoch_gan(
                               loss_G_fake + 
                               out_criterion["bpp_loss"] +
                               0.5 * out_criterion.get("dists", 0) +
-                              0.3 * out_criterion.get("pieapp", 0))
+                              0.3 * out_criterion.get("pieapp", 0))  # PIEAPP term kept but will be 0
             else:
                 loss_G_total = (3e-4 * out_criterion.get("charbonnier", 0) + 
                               2 * out_criterion["lpips"] + 
@@ -191,7 +192,7 @@ def train_one_epoch_gan(
                               loss_G_fake + 
                               out_criterion["bpp_loss"] +
                               0.5 * out_criterion.get("dists", 0) +
-                              0.3 * out_criterion.get("pieapp", 0))
+                              0.3 * out_criterion.get("pieapp", 0))  # PIEAPP term kept but will be 0
         loss_G_total.backward()
 
         if clip_max_norm > 0:
@@ -213,8 +214,9 @@ def train_one_epoch_gan(
                 tb_logger.add_scalar('{}'.format('[train]: rd_loss'), out_criterion["rd_loss"].item(), current_step)
             if out_criterion.get("dists") is not None and isinstance(out_criterion["dists"], torch.Tensor):
                 tb_logger.add_scalar('{}'.format('[train]: dists_loss'), out_criterion["dists"].item(), current_step)
-            if out_criterion.get("pieapp") is not None and isinstance(out_criterion["pieapp"], torch.Tensor):
-                tb_logger.add_scalar('{}'.format('[train]: pieapp_loss'), out_criterion["pieapp"].item(), current_step)
+            # PIEAPP logging commented out for now
+            # if out_criterion.get("pieapp") is not None and isinstance(out_criterion["pieapp"], torch.Tensor):
+            #     tb_logger.add_scalar('{}'.format('[train]: pieapp_loss'), out_criterion["pieapp"].item(), current_step)
           
         # print(out_criterion["loss"].size(),out_criterion["charbonnier"].size(),out_criterion["lpips"].size(),out_criterion["style_loss"].size())
         if i % 100 == 0:
@@ -229,8 +231,9 @@ def train_one_epoch_gan(
                 
                 dists_val = out_criterion.get("dists", 0)
                 dists_str = f'{dists_val.item():.4f}' if isinstance(dists_val, torch.Tensor) else '0.0000'
-                pieapp_val = out_criterion.get("pieapp", 0)
-                pieapp_str = f'{pieapp_val.item():.4f}' if isinstance(pieapp_val, torch.Tensor) else '0.0000'
+                # PIEAPP logging commented out for now
+                # pieapp_val = out_criterion.get("pieapp", 0)
+                # pieapp_str = f'{pieapp_val.item():.4f}' if isinstance(pieapp_val, torch.Tensor) else '0.0000'
                 
                 logger_train.info(
                     f"Train epoch {epoch + 1}: ["
@@ -242,7 +245,7 @@ def train_one_epoch_gan(
                     f'LPIPS loss: {out_criterion["lpips"].item():.4f} | '
                     f'Style loss: {out_criterion["style_loss"].item():.4f} | '
                     f'DISTS loss: {dists_str} | '
-                    f'PIEAPP loss: {pieapp_str} | '
+                    # f'PIEAPP loss: {pieapp_str} | '  # PIEAPP commented out
                     f'GAN loss: {loss_G_fake.item():.4f} | '
                     f'Bpp loss: {out_criterion["bpp_loss"].item():.2f} | '
                     f"Aux loss: {aux_loss.item():.2f}"

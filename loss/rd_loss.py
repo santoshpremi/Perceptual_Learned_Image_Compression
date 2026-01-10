@@ -8,11 +8,12 @@ from models.vgg import Vgg16
 
 # Add imports for DISTS and PIEAPP
 try:
-    from piq import DISTS, PieAPP
+    from piq import DISTS  # , PieAPP  # PIEAPP commented out for now
     PIQ_AVAILABLE = True
 except ImportError:
     print("Warning: piq library not found. Install with: pip install piq")
-    PIQ_AVAILABLE = False 
+    PIQ_AVAILABLE = False
+# PIEAPP removed temporarily - can be restored later 
 
 class RateDistortionLoss(nn.Module):
     """Custom rate distortion loss with a Lagrangian parameter."""
@@ -204,7 +205,8 @@ class RateDistortionPOELICLossPhase2(nn.Module):
     """Phase 2 loss: Enhanced perceptual loss with DISTS and PIEAPP.
     
     Uses Rate-Distortion (MSE/MS-SSIM) loss instead of Charbonnier for consistency with Phase 1.
-    Adds DISTS and PIEAPP perceptual losses for better human-perceived quality.
+    Adds DISTS perceptual loss for better human-perceived quality.
+    Note: PIEAPP is currently disabled but can be restored later.
     """
 
     def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None, metrics='mse'):
@@ -219,12 +221,13 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         # Add DISTS and PIEAPP if available
         if PIQ_AVAILABLE:
             self.dists = DISTS().to(device).eval()
-            self.pieapp = PieAPP().to(device).eval()
-            print("DISTS and PIEAPP losses initialized successfully")
+            # self.pieapp = PieAPP().to(device).eval()  # PIEAPP commented out for now
+            self.pieapp = None  # PIEAPP disabled
+            print("DISTS losses initialized successfully")  # PIEAPP removed from message
         else:
             self.dists = None
             self.pieapp = None
-            print("Warning: DISTS and PIEAPP not available. Install piq library.")
+            print("Warning: DISTS not available. Install piq library.")  # PIEAPP removed from message
         
         print(gpu_id)
         self.lmbda = lmbda
@@ -267,14 +270,14 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         else:
             out["dists"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
 
-        # Add PIEAPP loss
-        if self.pieapp is not None:
-            # PIEAPP expects images in [0, 1] range - clamp to ensure valid range
-            x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
-            target_clamped = torch.clamp(target, 0.0, 1.0)
-            out["pieapp"] = self.pieapp(x_hat_clamped, target_clamped)
-        else:
-            out["pieapp"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
+        # Add PIEAPP loss (commented out for now)
+        # if self.pieapp is not None:
+        #     # PIEAPP expects images in [0, 1] range - clamp to ensure valid range
+        #     x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
+        #     target_clamped = torch.clamp(target, 0.0, 1.0)
+        #     out["pieapp"] = self.pieapp(x_hat_clamped, target_clamped)
+        # else:
+        out["pieapp"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
         
         x_hat_feat = [feat for feat in x_hat_feat]
         target_feat = [feat for feat in target_feat]

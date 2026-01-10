@@ -210,7 +210,8 @@ def main():
     logger_train.info("=" * 80)
     logger_train.info("PHASE 1 TRAINING COMPLETE")
     logger_train.info(f"Best loss: {best_loss:.4f}")
-    logger_train.info("Next step: Use train_gan.py with --checkpoint to finetune with GAN loss and DISTS/PIEAPP (Phase 2)")
+    logger_train.info("Next step: Use train_gan.py with --checkpoint to finetune with GAN loss and DISTS (Phase 2)")
+    # Note: PIEAPP is currently disabled but can be restored later
     logger_train.info("=" * 80)
 
 if __name__ == '__main__':

@@ -21,7 +21,7 @@ def model_config():
         "lambda_face": 0,
         "lambda_gan": 1,
         "lambda_dists": 0.5,  # DISTS perceptual loss weight
-        "lambda_pieapp": 0.3,  # PIEAPP perceptual loss weight
+        "lambda_pieapp": 0.3,  # PIEAPP perceptual loss weight (currently disabled but kept for future use)
 
     })
 
