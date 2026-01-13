@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import os
 import logging
+from pathlib import Path
 
 from utils.args import test_options
 from config.config_5group import model_config
@@ -35,7 +36,7 @@ def main():
 
     test_transforms = transforms.Compose([transforms.ToTensor()])
 
-    # Use Open Images if split is a valid Open Images split, otherwise use ImageFolder (e.g., for Kodak)
+    # Use Open Images if split is a valid Open Images split, otherwise use ImageFolder (e.g., for Kodak, CLIC2022)
     if args.split in ["train", "validation", "test"]:
         test_dataset = OpenImagesDataset(
             root=args.dataset,
@@ -43,8 +44,26 @@ def main():
             transform=test_transforms,
         )
     else:
-        # Fallback to ImageFolder for other datasets like Kodak
-        test_dataset = ImageFolder(args.dataset, split=args.split, transform=test_transforms)
+        # For other datasets like Kodak or CLIC2022, use ImageFolder
+        # ImageFolder expects root/split to be the directory containing images
+        # Handle backward compatibility: original code passed full path to dataset directory
+        # e.g., --dataset /path/to/data/kodak --split kodak
+        # In this case, ImageFolder would look for /path/to/data/kodak/kodak/ (wrong!)
+        # So we detect this and use parent directory instead
+        dataset_path = Path(args.dataset).resolve()
+        split_name = args.split
+        
+        # Check if the dataset path already ends with the split name (backward compatibility)
+        # e.g., /path/to/data/kodak with split="kodak"
+        if dataset_path.name == split_name:
+            # args.dataset is the full path to the dataset directory
+            # Extract parent directory and use split name
+            parent_dir = str(dataset_path.parent)
+            test_dataset = ImageFolder(parent_dir, split=split_name, transform=test_transforms)
+        else:
+            # args.dataset is the parent directory (e.g., /path/to/data)
+            # ImageFolder will look for /path/to/data/split_name/
+            test_dataset = ImageFolder(str(dataset_path), split=split_name, transform=test_transforms)
 
     test_dataloader = DataLoader(
         test_dataset,

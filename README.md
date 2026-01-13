@@ -38,6 +38,10 @@ pip install -r requirements.txt
   - Images will be downloaded to `data/open_images/train/`, `data/open_images/validation/`, etc.
 - **Kodak PhotoCD (evaluation)**: `bash scripts/download_kodak.sh /absolute/path/to/data`
   - Downloads and verifies the 24 Kodak images under `data/kodak/`.
+- **CLIC2022 (evaluation)**: `bash scripts/download_clic2022.sh /absolute/path/to/data`
+  - Downloads the CLIC2022 validation set (used in HFLIC paper for evaluation).
+  - Images will be placed under `data/clic2022/`.
+  - Note: You may need to download manually from [compression.cc](https://compression.cc/) if automated download is not available.
 
 ## Training & Evaluation
 
@@ -83,9 +87,13 @@ bash scripts/download_open_images.sh --split test --full ${DATA_DIR}
 bash scripts/download_open_images.sh --image-list <path/to/image_list.txt> /absolute/path/to/data
 ```
 
-**Download Kodak dataset (for evaluation):**
+**Download evaluation datasets:**
 ```bash
+# Download Kodak dataset (24 images, standard benchmark)
 bash scripts/download_kodak.sh /absolute/path/to/data
+
+# Download CLIC2022 validation set (used in HFLIC paper)
+bash scripts/download_clic2022.sh /absolute/path/to/data
 ```
 
 **Note**: The script automatically fetches image IDs from Open Images S3 bucket. No manual .txt files needed!
@@ -109,7 +117,7 @@ bash scripts/train_stage1.sh /absolute/path/to/data \
   --learning-rate 1e-4 \
   --gpu_id 0 \
   --train-split train \
-  --eval-split kodak
+  --eval-split kodak  # or use --eval-split clic2022 for CLIC2022 validation set
 ```
 
 **Loss components**: Charbonnier (λ=2e-6) + LPIPS (λ=1) + Style (λ=1e2) + Rate/BPP (λ=0.3)  
@@ -141,11 +149,20 @@ bash scripts/train_hflic.sh /absolute/path/to/data \
 
 #### 4. Evaluation
 
-**Evaluate on Kodak dataset:**
+**Evaluate on Kodak dataset (standard benchmark):**
 ```bash
 bash scripts/eval_hflic.sh /absolute/path/to/data/kodak \
   ./experiments/hflic_stage2/checkpoints/checkpoint_best_loss.pth.tar \
   --split kodak \
+  --test-batch-size 1 \
+  --gpu_id 0
+```
+
+**Evaluate on CLIC2022 validation set (matches HFLIC paper evaluation):**
+```bash
+bash scripts/eval_hflic.sh /absolute/path/to/data \
+  ./experiments/hflic_stage2/checkpoints/checkpoint_best_loss.pth.tar \
+  --split clic2022 \
   --test-batch-size 1 \
   --gpu_id 0
 ```
@@ -167,6 +184,7 @@ DATA_DIR="/absolute/path/to/data"
 
 # 1. Download datasets
 bash scripts/download_kodak.sh ${DATA_DIR}
+bash scripts/download_clic2022.sh ${DATA_DIR}
 bash scripts/download_open_images.sh --split train --max-images 5000 ${DATA_DIR}
 bash scripts/download_open_images.sh --split validation ${DATA_DIR}
 
@@ -185,10 +203,17 @@ bash scripts/train_hflic.sh ${DATA_DIR} \
   --batch-size 8 \
   --gpu_id 0
 
-# 4. Evaluation on Kodak
+# 4. Evaluation
+# Evaluate on Kodak (standard benchmark)
 bash scripts/eval_hflic.sh ${DATA_DIR}/kodak \
   ./experiments/hflic_stage2/checkpoints/checkpoint_best_loss.pth.tar \
   --split kodak \
+  --gpu_id 0
+
+# Evaluate on CLIC2022 (matches HFLIC paper)
+bash scripts/eval_hflic.sh ${DATA_DIR} \
+  ./experiments/hflic_stage2/checkpoints/checkpoint_best_loss.pth.tar \
+  --split clic2022 \
   --gpu_id 0
 ```
 

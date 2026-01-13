@@ -78,7 +78,7 @@ def main():
         split=args.train_split,
         transform=train_transforms,
     )
-    # Use Open Images for evaluation if eval_split is a valid Open Images split, otherwise use ImageFolder (e.g., for Kodak)
+    # Use Open Images for evaluation if eval_split is a valid Open Images split, otherwise use ImageFolder (e.g., for Kodak, CLIC2022)
     if args.eval_split in ["train", "validation", "test"]:
         # For Open Images splits, use the same root as training (open_images directory)
         test_dataset = OpenImagesDataset(
@@ -87,7 +87,10 @@ def main():
             transform=test_transforms,
         )
     else:
-        # Fallback to ImageFolder for other datasets like Kodak
+        # For other datasets like Kodak or CLIC2022, use ImageFolder
+        # ImageFolder expects root/split to be the directory containing images
+        # e.g., root="data", split="kodak" → looks for "data/kodak/"
+        # e.g., root="data", split="clic2022" → looks for "data/clic2022/"
         test_dataset = ImageFolder(args.eval_root, split=args.eval_split, transform=test_transforms)
 
     train_dataloader = DataLoader(

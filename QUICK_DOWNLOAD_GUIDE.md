@@ -34,10 +34,14 @@ bash scripts/download_open_images.sh --split validation --full ${DATA_DIR}
 bash scripts/download_open_images.sh --split test --full ${DATA_DIR}
 ```
 
-### Download Kodak (For Current Evaluation)
+### Download Evaluation Datasets
 
 ```bash
+# Download Kodak (24 images, standard benchmark)
 bash scripts/download_kodak.sh ${DATA_DIR}
+
+# Download CLIC2022 validation set (used in HFLIC paper)
+bash scripts/download_clic2022.sh ${DATA_DIR}
 ```
 
 ## Complete One-Line Setup
@@ -48,7 +52,8 @@ DATA_DIR="/path/to/your/data" && \
 bash scripts/download_open_images.sh --split train --max-images 1000 ${DATA_DIR} && \
 bash scripts/download_open_images.sh --split validation --max-images 1000 ${DATA_DIR} && \
 bash scripts/download_open_images.sh --split test --max-images 1000 ${DATA_DIR} && \
-bash scripts/download_kodak.sh ${DATA_DIR}
+bash scripts/download_kodak.sh ${DATA_DIR} && \
+bash scripts/download_clic2022.sh ${DATA_DIR}
 ```
 
 ### Full Setup (All images)
@@ -57,12 +62,13 @@ DATA_DIR="/path/to/your/data" && \
 bash scripts/download_open_images.sh --split train --full ${DATA_DIR} && \
 bash scripts/download_open_images.sh --split validation --full ${DATA_DIR} && \
 bash scripts/download_open_images.sh --split test --full ${DATA_DIR} && \
-bash scripts/download_kodak.sh ${DATA_DIR}
+bash scripts/download_kodak.sh ${DATA_DIR} && \
+bash scripts/download_clic2022.sh ${DATA_DIR}
 ```
 
 ## Usage in Training
 
-### Current: Using Kodak for Evaluation
+### Using Kodak for Evaluation (Standard Benchmark)
 ```bash
 bash scripts/train_stage1.sh ${DATA_DIR} \
   --train-split train \
@@ -70,7 +76,15 @@ bash scripts/train_stage1.sh ${DATA_DIR} \
   --experiment hflic_stage1
 ```
 
-### Future: Using Open Images Test for Evaluation
+### Using CLIC2022 for Evaluation (Matches HFLIC Paper)
+```bash
+bash scripts/train_stage1.sh ${DATA_DIR} \
+  --train-split train \
+  --eval-split clic2022 \
+  --experiment hflic_stage1
+```
+
+### Using Open Images Test for Evaluation
 ```bash
 bash scripts/train_stage1.sh ${DATA_DIR} \
   --train-split train \

@@ -44,9 +44,9 @@ def train_options():
     )
     parser.add_argument(
         "--eval-split",
-        default="validation",
+        default="kodak",
         type=str,
-        help="Open Images split to use for evaluation (default: validation). Use 'kodak' for Kodak dataset."
+        help="Dataset split to use for evaluation (default: kodak). Options: 'kodak' for Kodak dataset (default); 'clic2022' for CLIC2022 validation set; 'train', 'validation', 'test' for Open Images."
     )
     parser.add_argument(
         "-e",
@@ -232,7 +232,7 @@ def test_options():
         "--split",
         type=str,
         default="kodak",
-        help="split dataset for (default: %(default)s)",
+        help="Dataset split for evaluation (default: %(default)s). Options: 'kodak', 'clic2022', or Open Images splits ('train', 'validation', 'test')",
     )
     parser.add_argument(
         "--list-file",

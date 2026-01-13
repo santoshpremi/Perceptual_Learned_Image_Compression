@@ -92,7 +92,7 @@ chmod +x download_all_datasets.sh
 
 ## Usage in Training
 
-### Current Setup (Using Kodak for Evaluation)
+### Using Kodak for Evaluation (Standard Benchmark)
 
 ```bash
 # Training uses Open Images train split
@@ -104,7 +104,19 @@ bash scripts/train_stage1.sh ${DATA_DIR} \
   --experiment hflic_stage1
 ```
 
-### Future Setup (Using Open Images Test for Evaluation)
+### Using CLIC2022 for Evaluation (Matches HFLIC Paper)
+
+```bash
+# Training uses Open Images train split
+# Evaluation uses CLIC2022 validation set
+
+bash scripts/train_stage1.sh ${DATA_DIR} \
+  --train-split train \
+  --eval-split clic2022 \
+  --experiment hflic_stage1
+```
+
+### Using Open Images Test for Evaluation
 
 ```bash
 # Training uses Open Images train split

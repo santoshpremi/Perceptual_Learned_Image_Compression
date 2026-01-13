@@ -41,8 +41,8 @@ Complete guide to set up and run the Perceptual Learned Image Compression projec
 | Phase | Flag | Options | Recommended | Purpose |
 |-------|------|---------|-------------|---------|
 | **Training** | `--train-split` | `train` | `train` | Learn from large dataset |
-| **Validation** | `--eval-split` | `kodak`, `validation`, `test` | `kodak` | Fast validation, standard benchmark |
-| **Evaluation** | `--split` | `kodak`, `test`, `validation` | `kodak` | Final assessment, paper results |
+| **Validation** | `--eval-split` | `kodak`, `clic2022`, `validation`, `test` | `kodak` | Fast validation, standard benchmark |
+| **Evaluation** | `--split` | `kodak`, `clic2022`, `test`, `validation` | `kodak` | Final assessment, paper results |
 
 ### Recommended Data Strategy
 
@@ -51,13 +51,13 @@ Complete guide to set up and run the Perceptual Learned Image Compression projec
 - Command: `--train-split train`
 
 **For Validation (During Training):**
-- Use Kodak dataset (fast, standard benchmark)
-- Command: `--eval-split kodak`
+- Use Kodak dataset (fast, standard benchmark) - Command: `--eval-split kodak`
+- Use CLIC2022 validation set (matches HFLIC paper) - Command: `--eval-split clic2022`
 - Alternative: Open Images validation if you want larger validation set
 
 **For Evaluation (After Training):**
-- Use Kodak for standard benchmarking (recommended)
-- Command: `--split kodak`
+- Use Kodak for standard benchmarking (recommended) - Command: `--split kodak`
+- Use CLIC2022 for HFLIC paper comparison - Command: `--split clic2022`
 - Alternative: Open Images test for comprehensive evaluation
 
 ---
@@ -160,6 +160,9 @@ bash scripts/download_open_images.sh --split test --max-images 1000 ${DATA_DIR}
 
 # Download Kodak dataset (24 images for evaluation)
 bash scripts/download_kodak.sh ${DATA_DIR}
+
+# Download CLIC2022 validation set (used in HFLIC paper)
+bash scripts/download_clic2022.sh ${DATA_DIR}
 ```
 
 **Expected output:**
@@ -167,6 +170,7 @@ bash scripts/download_kodak.sh ${DATA_DIR}
 - Validation images: `${DATA_DIR}/open_images/validation/` (~1000 images)
 - Test images: `${DATA_DIR}/open_images/test/` (~1000 images)
 - Kodak images: `${DATA_DIR}/kodak/` (24 images)
+- CLIC2022 images: `${DATA_DIR}/clic2022/` (~102 validation images)
 
 ### Full Setup (All Images - For Production)
 
@@ -187,6 +191,7 @@ echo "Training images: $(find ${DATA_DIR}/open_images/train -name '*.jpg' | wc -
 echo "Validation images: $(find ${DATA_DIR}/open_images/validation -name '*.jpg' | wc -l)"
 echo "Test images: $(find ${DATA_DIR}/open_images/test -name '*.jpg' | wc -l)"
 echo "Kodak images: $(find ${DATA_DIR}/kodak -name '*.png' | wc -l)"
+echo "CLIC2022 images: $(find ${DATA_DIR}/clic2022 -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' \) | wc -l)"
 ```
 
 ---
@@ -229,6 +234,12 @@ The `--eval-split` flag determines which dataset is used for **validation during
   - Small dataset = fast validation
   - Located at: `${DATA_DIR}/kodak/`
   - **Best for**: Quick validation, standard benchmarking
+
+- **`--eval-split clic2022`**
+  - Uses CLIC2022 validation set (~102 images)
+  - Matches HFLIC paper evaluation setup
+  - Located at: `${DATA_DIR}/clic2022/`
+  - **Best for**: Comparing with HFLIC paper results
 
 - **`--eval-split validation`**
   - Uses Open Images validation split
@@ -664,10 +675,17 @@ bash scripts/train_hflic.sh ${DATA_DIR} \
   --eval-split kodak \
   --gpu_id 0
 
-# 5. Final Evaluation (on Kodak - standard benchmark)
+# 5. Final Evaluation
+# Evaluate on Kodak (standard benchmark)
 bash scripts/eval_hflic.sh ${DATA_DIR}/kodak \
   ./experiments/hflic_stage2/checkpoints/checkpoint_best_loss.pth.tar \
   --split kodak \
+  --gpu_id 0
+
+# Evaluate on CLIC2022 (matches HFLIC paper)
+bash scripts/eval_hflic.sh ${DATA_DIR} \
+  ./experiments/hflic_stage2/checkpoints/checkpoint_best_loss.pth.tar \
+  --split clic2022 \
   --gpu_id 0
 
 # Alternative: Final Evaluation (on Open Images test split)
@@ -682,13 +700,13 @@ bash scripts/eval_hflic.sh ${DATA_DIR}/open_images \
 | Phase | Data Used | Purpose | Flag |
 |-------|-----------|---------|------|
 | **Training** | Open Images train split | Learn compression | `--train-split train` |
-| **Validation** (during training) | Kodak / Open Images validation | Monitor progress, select best model | `--eval-split kodak/validation` |
-| **Evaluation** (after training) | Kodak / Open Images test | Final performance assessment | `--split kodak/test` |
+| **Validation** (during training) | Kodak / CLIC2022 / Open Images validation | Monitor progress, select best model | `--eval-split kodak/clic2022/validation` |
+| **Evaluation** (after training) | Kodak / CLIC2022 / Open Images test | Final performance assessment | `--split kodak/clic2022/test` |
 
 **Recommended Setup:**
 - **Training**: Open Images train split (large dataset)
-- **Validation**: Kodak (fast, standard benchmark)
-- **Evaluation**: Kodak (standard benchmark) or Open Images test (comprehensive)
+- **Validation**: Kodak (fast, standard benchmark) or CLIC2022 (matches HFLIC paper)
+- **Evaluation**: Kodak (standard benchmark), CLIC2022 (HFLIC paper comparison), or Open Images test (comprehensive)
 
 ---
 
