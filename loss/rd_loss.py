@@ -202,17 +202,19 @@ class RateDistortionPOELICLoss(nn.Module):
 
 
 class RateDistortionPOELICLossPhase2(nn.Module):
-    """Phase 2 loss: Enhanced perceptual loss with DISTS and PIEAPP.
+    """Phase 2 loss: Original HFLIC Phase 2 loss with Charbonnier and GAN.
     
-    Uses Rate-Distortion (MSE/MS-SSIM) loss instead of Charbonnier for consistency with Phase 1.
-    Adds DISTS perceptual loss for better human-perceived quality.
-    Note: PIEAPP is currently disabled but can be restored later.
+    Uses Charbonnier loss (original HFLIC Phase 2) instead of Rate-Distortion loss.
+    Includes: Charbonnier + LPIPS + Style + GAN + Rate (BPP)
+    Note: DISTS and PIEAPP are computed but excluded from loss calculation for original comparison.
     """
 
     def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None, metrics='mse'):
         super().__init__()
         # Use MSE or MS-SSIM for rate-distortion loss (same as Phase 1)
         self.mse = nn.MSELoss()
+        # Add Charbonnier loss for original Phase 2
+        self.charbonnier = CharbonnierLoss()
         self.gan = GANLoss()
         self.style = StyleLoss()
         self.lpips = ps.PerceptualLoss(model='net-lin', net='vgg',
@@ -247,17 +249,9 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         x_hat_feat = self.vgg(output["x_hat"])
         target_feat = self.vgg(target)
 
-        # Use rate-distortion loss instead of Charbonnier (same as Phase 1)
-        if self.metrics == 'mse':
-            out["rd_loss"] = self.mse(output["x_hat"], target)
-            out["charbonnier"] = None  # Keep for backward compatibility but set to None
-        elif self.metrics == 'ms-ssim':
-            out["rd_loss"] = 1 - ms_ssim(output["x_hat"], target, data_range=1.0)
-            out["charbonnier"] = None
-        else:
-            # Fallback to MSE if unknown metric
-            out["rd_loss"] = self.mse(output["x_hat"], target)
-            out["charbonnier"] = None
+        # Original Phase 2: Use Charbonnier loss (original HFLIC Phase 2)
+        out["charbonnier"] = self.charbonnier(output["x_hat"], target)
+        out["rd_loss"] = None  # Set to None to use Charbonnier branch in training
         
         out["lpips"] = self.lpips(output["x_hat"], target).mean()
         

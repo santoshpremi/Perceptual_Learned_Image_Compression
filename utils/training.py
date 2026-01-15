@@ -154,8 +154,8 @@ def train_one_epoch_gan(
         loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
 
         out_criterion = criterion(out_net, d)
-        # Phase 2: Use Rate-Distortion loss (same as Phase 1) + DISTS and PIEAPP losses
-        # Note: PIEAPP is currently disabled but can be restored later
+        # Phase 2: Original HFLIC Phase 2 uses Charbonnier + LPIPS + Style + GAN + Rate (BPP)
+        # Current implementation: Charbonnier (original) vs RD loss + DISTS + PIEAPP (enhanced)
         if config is not None:
             # Check if using new RD loss or old Charbonnier (for backward compatibility)
             if "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
@@ -167,14 +167,13 @@ def train_one_epoch_gan(
                               config.get("lambda_dists", 0.5) * out_criterion.get("dists", 0) +
                               config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))  # PIEAPP term kept but will be 0
             else:
-                # Fallback to Charbonnier if RD loss not available (backward compatibility)
+                # Original Phase 2: Use Charbonnier without DISTS/PIEAPP for comparison
+                # Note: DISTS and PIEAPP excluded for original Phase 2 comparison
                 loss_G_total = (config.get("lambda_char", 2e-6) * out_criterion.get("charbonnier", 0) + 
                               config["lambda_lpips"] * out_criterion["lpips"] + 
                               config["lambda_style"] * out_criterion["style_loss"] + 
                               config["lambda_gan"] * loss_G_fake + 
-                              config["lambda_rate"] * out_criterion["bpp_loss"] +
-                              config.get("lambda_dists", 0.5) * out_criterion.get("dists", 0) +
-                              config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))  # PIEAPP term kept but will be 0
+                              config["lambda_rate"] * out_criterion["bpp_loss"])
         else:
             # Default hardcoded values (for backward compatibility)
             if "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
@@ -186,13 +185,13 @@ def train_one_epoch_gan(
                               0.5 * out_criterion.get("dists", 0) +
                               0.3 * out_criterion.get("pieapp", 0))  # PIEAPP term kept but will be 0
             else:
+                # Original Phase 2: Use Charbonnier without DISTS/PIEAPP (default hardcoded values)
+                # Note: DISTS and PIEAPP excluded for original Phase 2 comparison
                 loss_G_total = (3e-4 * out_criterion.get("charbonnier", 0) + 
                               2 * out_criterion["lpips"] + 
                               out_criterion["style_loss"] + 
                               loss_G_fake + 
-                              out_criterion["bpp_loss"] +
-                              0.5 * out_criterion.get("dists", 0) +
-                              0.3 * out_criterion.get("pieapp", 0))  # PIEAPP term kept but will be 0
+                              out_criterion["bpp_loss"])
         loss_G_total.backward()
 
         if clip_max_norm > 0:
