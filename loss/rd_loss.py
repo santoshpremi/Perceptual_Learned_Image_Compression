@@ -220,16 +220,11 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         self.lpips = ps.PerceptualLoss(model='net-lin', net='vgg',
                                use_gpu=torch.cuda.is_available(), gpu_ids=gpu_id)
         
-        # Add DISTS and PIEAPP if available
-        if PIQ_AVAILABLE:
-            self.dists = DISTS().to(device).eval()
-            # self.pieapp = PieAPP().to(device).eval()  # PIEAPP commented out for now
-            self.pieapp = None  # PIEAPP disabled
-            print("DISTS losses initialized successfully")  # PIEAPP removed from message
-        else:
-            self.dists = None
-            self.pieapp = None
-            print("Warning: DISTS not available. Install piq library.")  # PIEAPP removed from message
+        # Skip DISTS initialization for original Phase 2 to save GPU memory (0.5-2 GB)
+        # DISTS is only needed for enhanced Phase 2 with RD loss
+        self.dists = None
+        self.pieapp = None
+        # Note: DISTS not initialized to save memory (not used in original Phase 2)
         
         print(gpu_id)
         self.lmbda = lmbda
