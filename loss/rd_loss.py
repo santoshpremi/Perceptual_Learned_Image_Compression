@@ -206,7 +206,7 @@ class RateDistortionPOELICLossPhase2(nn.Module):
     
     Uses Charbonnier loss (original HFLIC Phase 2) instead of Rate-Distortion loss.
     Includes: Charbonnier + LPIPS + Style + GAN + Rate (BPP)
-    Note: DISTS and PIEAPP are computed but excluded from loss calculation for original comparison.
+    Note: DISTS computation is skipped to save memory (not used in original Phase 2 loss). PIEAPP is also disabled.
     """
 
     def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None, metrics='mse'):
@@ -255,14 +255,9 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         
         out["lpips"] = self.lpips(output["x_hat"], target).mean()
         
-        # Add DISTS loss
-        if self.dists is not None:
-            # DISTS expects images in [0, 1] range - clamp to ensure valid range
-            x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
-            target_clamped = torch.clamp(target, 0.0, 1.0)
-            out["dists"] = self.dists(x_hat_clamped, target_clamped)
-        else:
-            out["dists"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
+        # Skip DISTS computation for original Phase 2 to save memory (not used in loss)
+        # DISTS is only needed for enhanced Phase 2 with RD loss
+        out["dists"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
 
         # Add PIEAPP loss (commented out for now)
         # if self.pieapp is not None:
