@@ -415,11 +415,10 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
                 dists_val = out_criterion["dists"]
                 if isinstance(dists_val, torch.Tensor):
                     dists.update(dists_val.item())
-            # PIEAPP tracking commented out for now
-            # if out_criterion.get("pieapp") is not None:
-            #     pieapp_val = out_criterion["pieapp"]
-            #     if isinstance(pieapp_val, torch.Tensor):
-            #         pieapp.update(pieapp_val.item())
+            if out_criterion.get("pieapp") is not None:
+                pieapp_val = out_criterion["pieapp"]
+                if isinstance(pieapp_val, torch.Tensor):
+                    pieapp.update(pieapp_val.item())
 
             rec = torch2img(out_net['x_hat'])
             img = torch2img(d)
@@ -444,14 +443,13 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
         tb_logger.add_scalar('{}'.format('[val]: charbonnier loss'), charbonnier.avg, epoch + 1)
     if dists.count > 0:
         tb_logger.add_scalar('{}'.format('[val]: dists loss'), dists.avg, epoch + 1)
-    # PIEAPP logging commented out for now
-    # if pieapp.count > 0:
-    #     tb_logger.add_scalar('{}'.format('[val]: pieapp loss'), pieapp.avg, epoch + 1)
+    if pieapp.count > 0:
+        tb_logger.add_scalar('{}'.format('[val]: pieapp loss'), pieapp.avg, epoch + 1)
     
     rd_str = f"{rd_loss.avg:.4f}" if rd_loss.count > 0 else "N/A"
     charbonnier_str = f"{charbonnier.avg:.4f}" if charbonnier.count > 0 else "N/A"
     dists_str = f"{dists.avg:.4f}" if dists.count > 0 else "N/A"
-    # pieapp_str = f"{pieapp.avg:.4f}" if pieapp.count > 0 else "N/A"  # PIEAPP commented out
+    pieapp_str = f"{pieapp.avg:.4f}" if pieapp.count > 0 else "N/A"
     
     logger_val.info(
         f"Test epoch {epoch + 1}: Average losses: "
@@ -461,7 +459,7 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
         f"LPIPS loss: {lpips.avg:.4f} | "
         f"Style loss: {style_loss.avg:.4f} | "
         f"DISTS loss: {dists_str} | "
-        # f"PIEAPP loss: {pieapp_str} | "  # PIEAPP commented out
+        f"PIEAPP loss: {pieapp_str} | "
         f"Adv loss: {adv_loss.avg:.4f} | "
         f"Bpp loss: {bpp_loss.avg:.4f} | "
         f"Aux loss: {aux_loss.avg:.2f} | "

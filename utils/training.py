@@ -229,9 +229,8 @@ def train_one_epoch_gan(
                 tb_logger.add_scalar('{}'.format('[train]: rd_loss'), out_criterion["rd_loss"].item(), current_step)
             if out_criterion.get("dists") is not None and isinstance(out_criterion["dists"], torch.Tensor):
                 tb_logger.add_scalar('{}'.format('[train]: dists_loss'), out_criterion["dists"].item(), current_step)
-            # PIEAPP logging commented out for now
-            # if out_criterion.get("pieapp") is not None and isinstance(out_criterion["pieapp"], torch.Tensor):
-            #     tb_logger.add_scalar('{}'.format('[train]: pieapp_loss'), out_criterion["pieapp"].item(), current_step)
+            if out_criterion.get("pieapp") is not None and isinstance(out_criterion["pieapp"], torch.Tensor):
+                tb_logger.add_scalar('{}'.format('[train]: pieapp_loss'), out_criterion["pieapp"].item(), current_step)
           
         # print(out_criterion["loss"].size(),out_criterion["charbonnier"].size(),out_criterion["lpips"].size(),out_criterion["style_loss"].size())
         if i % 100 == 0:
@@ -246,9 +245,8 @@ def train_one_epoch_gan(
                 
                 dists_val = out_criterion.get("dists", 0)
                 dists_str = f'{dists_val.item():.4f}' if isinstance(dists_val, torch.Tensor) else '0.0000'
-                # PIEAPP logging commented out for now
-                # pieapp_val = out_criterion.get("pieapp", 0)
-                # pieapp_str = f'{pieapp_val.item():.4f}' if isinstance(pieapp_val, torch.Tensor) else '0.0000'
+                pieapp_val = out_criterion.get("pieapp", 0)
+                pieapp_str = f'{pieapp_val.item():.4f}' if isinstance(pieapp_val, torch.Tensor) else '0.0000'
                 
                 logger_train.info(
                     f"Train epoch {epoch + 1}: ["
@@ -260,7 +258,7 @@ def train_one_epoch_gan(
                     f'LPIPS loss: {out_criterion["lpips"].item():.4f} | '
                     f'Style loss: {out_criterion["style_loss"].item():.4f} | '
                     f'DISTS loss: {dists_str} | '
-                    # f'PIEAPP loss: {pieapp_str} | '  # PIEAPP commented out
+                    f'PIEAPP loss: {pieapp_str} | '
                     f'GAN loss: {loss_G_fake.item():.4f} | '
                     f'Bpp loss: {out_criterion["bpp_loss"].item():.2f} | '
                     f"Aux loss: {aux_loss.item():.2f}"
