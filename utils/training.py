@@ -154,26 +154,41 @@ def train_one_epoch_gan(
         loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
 
         out_criterion = criterion(out_net, d)
-        # Phase 2: Original HFLIC Phase 2 uses Charbonnier + LPIPS + Style + GAN + Rate (BPP)
-        # Current implementation: Charbonnier (original) vs RD loss + DISTS + PIEAPP (enhanced)
+        # Phase 2: Use Rate-Distortion loss + DISTS + PIEAPP perceptual losses
+        # Strategy 3: Supports adaptive rate control for BPP targeting
         if config is not None:
+            # Adaptive rate control: increase lambda_rate when BPP exceeds target
+            target_bpp = config.get("target_bpp", None)
+            base_lambda_rate = config["lambda_rate"]
+            
+            if target_bpp is not None:
+                # P-controller for adaptive rate control
+                current_bpp = out_criterion["bpp_loss"].item()
+                bpp_error = current_bpp - target_bpp
+                # Increase rate penalty when over target, decrease when under
+                adaptive_lambda_rate = base_lambda_rate + 2.0 * max(0, bpp_error)
+                adaptive_lambda_rate = max(0.3, min(1.5, adaptive_lambda_rate))  # Clamp to reasonable range
+            else:
+                adaptive_lambda_rate = base_lambda_rate
+            
             # Check if using new RD loss or old Charbonnier (for backward compatibility)
             if "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
                 loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
                               config["lambda_lpips"] * out_criterion["lpips"] + 
                               config["lambda_style"] * out_criterion["style_loss"] + 
                               config["lambda_gan"] * loss_G_fake + 
-                              config["lambda_rate"] * out_criterion["bpp_loss"] +
+                              adaptive_lambda_rate * out_criterion["bpp_loss"] +
                               config.get("lambda_dists", 0.5) * out_criterion.get("dists", 0) +
-                              config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))  # PIEAPP term kept but will be 0
+                              config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))
             else:
-                # Original Phase 2: Use Charbonnier without DISTS/PIEAPP for comparison
-                # Note: DISTS and PIEAPP excluded for original Phase 2 comparison
+                # Fallback to Charbonnier if RD loss not available (backward compatibility)
                 loss_G_total = (config.get("lambda_char", 2e-6) * out_criterion.get("charbonnier", 0) + 
                               config["lambda_lpips"] * out_criterion["lpips"] + 
                               config["lambda_style"] * out_criterion["style_loss"] + 
                               config["lambda_gan"] * loss_G_fake + 
-                              config["lambda_rate"] * out_criterion["bpp_loss"])
+                              adaptive_lambda_rate * out_criterion["bpp_loss"] + 
+                              config.get("lambda_dists", 0.5) * out_criterion.get("dists", 0) + 
+                              config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))
         else:
             # Default hardcoded values (for backward compatibility)
             if "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
@@ -185,13 +200,14 @@ def train_one_epoch_gan(
                               0.5 * out_criterion.get("dists", 0) +
                               0.3 * out_criterion.get("pieapp", 0))  # PIEAPP term kept but will be 0
             else:
-                # Original Phase 2: Use Charbonnier without DISTS/PIEAPP (default hardcoded values)
-                # Note: DISTS and PIEAPP excluded for original Phase 2 comparison
+                # Fallback to Charbonnier if RD loss not available (default hardcoded values)
                 loss_G_total = (3e-4 * out_criterion.get("charbonnier", 0) + 
                               2 * out_criterion["lpips"] + 
                               out_criterion["style_loss"] + 
                               loss_G_fake + 
-                              out_criterion["bpp_loss"])
+                              out_criterion["bpp_loss"] + 
+                              0.5 * out_criterion.get("dists", 0) + 
+                              0.3 * out_criterion.get("pieapp", 0))  # PIEAPP term kept but will be 0
         loss_G_total.backward()
 
         if clip_max_norm > 0:

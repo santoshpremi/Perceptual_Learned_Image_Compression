@@ -19,7 +19,7 @@ from utils.training import train_one_epoch_gan
 from utils.testing import test_one_epoch_gan
 from loss.rd_loss import RateDistortionPOELICLossPhase2
 from utils.args import train_options
-from config.config_5group import model_config
+from config.config_phase2_strategy3 import model_config
 from models.models import ELIC
 from models.disc import Discriminator, init_weights
 from datasets.open_images import OpenImagesDataset
@@ -46,7 +46,9 @@ def main():
     Image.MAX_IMAGE_PIXELS = None
     seed =  setup_seed()
     args = train_options()
-    config = model_config()
+    # Config will be loaded dynamically per epoch (for automatic phase switching)
+    # Initial config for model architecture setup
+    config = model_config(epoch=0)
 
     os.environ['CUDA_VISIBLE_DEVICES'] =  ', '.join(str(id) for id in args.gpu_id)
     device = "cuda" if args.cuda and torch.cuda.is_available() else "cpu"
@@ -154,10 +156,26 @@ def main():
 
     logger_train.info(f"Seed: {seed}")
     logger_train.info(args)
+    logger_train.info("=" * 80)
+    logger_train.info("PHASE 2 TRAINING: Strategy 3 - Automatic Phase Switching")
+    logger_train.info("Phase 2a (epochs 0-14): Rate Anchoring - Establish BPP at 0.17")
+    logger_train.info("Phase 2b (epochs 15+): Perceptual Refinement - Maximize quality")
+    logger_train.info("=" * 80)
     # logger_train.info(net)
     optimizer.param_groups[0]['lr'] = args.learning_rate
     for epoch in range(start_epoch, args.epochs):
-        logger_train.info(f"Learning rate: {optimizer.param_groups[0]['lr']}")
+        # Get config dynamically based on epoch (automatic phase switching)
+        # Phase 2 epoch is relative to Phase 2 start (epoch 0 = first Phase 2 epoch)
+        phase2_epoch = epoch - start_epoch if start_epoch > 0 else epoch
+        config = model_config(epoch=phase2_epoch)
+        
+        # Log phase switch
+        if phase2_epoch == 15:
+            logger_train.info("=" * 80)
+            logger_train.info(f"SWITCHING TO PHASE 2b: Perceptual Refinement (epoch {epoch})")
+            logger_train.info("=" * 80)
+        
+        logger_train.info(f"Epoch {epoch} | Phase: {config.get('phase', 'unknown')} | Learning rate: {optimizer.param_groups[0]['lr']}")
         current_step = train_one_epoch_gan(
             net,
             net_disc,

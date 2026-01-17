@@ -358,27 +358,29 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
 
             pred_fake = model_disc(out_net["x_hat"])
             loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
-            # Phase 2: Use Rate-Distortion loss (same as Phase 1) + DISTS and PIEAPP losses
-            # Note: PIEAPP is currently disabled but can be restored later
+            # Phase 2: Use Rate-Distortion loss + DISTS + PIEAPP perceptual losses
             if config is not None:
+                # Use base lambda_rate for testing (no adaptive control during eval)
+                lambda_rate = config["lambda_rate"]
+                
                 # Check if using new RD loss or old Charbonnier (for backward compatibility)
                 if "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
                     loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
                                   config["lambda_lpips"] * out_criterion["lpips"] + 
                                   config["lambda_style"] * out_criterion["style_loss"] + 
                                   config["lambda_gan"] * loss_G_fake + 
-                                  config["lambda_rate"] * out_criterion["bpp_loss"] +
+                                  lambda_rate * out_criterion["bpp_loss"] +
                                   config.get("lambda_dists", 0.5) * out_criterion.get("dists", 0) +
-                                  config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))  # PIEAPP term kept but will be 0
+                                  config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))
                 else:
                     # Fallback to Charbonnier if RD loss not available (backward compatibility)
                     loss_G_total = (config.get("lambda_char", 2e-6) * out_criterion.get("charbonnier", 0) + 
                                   config["lambda_lpips"] * out_criterion["lpips"] + 
                                   config["lambda_style"] * out_criterion["style_loss"] + 
                                   config["lambda_gan"] * loss_G_fake + 
-                                  config["lambda_rate"] * out_criterion["bpp_loss"] +
+                                  lambda_rate * out_criterion["bpp_loss"] +
                                   config.get("lambda_dists", 0.5) * out_criterion.get("dists", 0) +
-                                  config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))  # PIEAPP term kept but will be 0
+                                  config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))
             else:
                 # Default hardcoded values (for backward compatibility)
                 if "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
