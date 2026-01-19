@@ -20,8 +20,8 @@ def model_config():
         "lambda_rd": 1e-2,  # Keep for backward compatibility (not used in Phase 1)
         "lambda_face": 0,
         "lambda_gan": 1,
-        "lambda_dists": 0.5,  # DISTS perceptual loss weight
-        "lambda_pieapp": 0.3,  # PIEAPP perceptual loss weight (currently disabled but kept for future use)
+        # "lambda_dists": 0.5,  # DISTS removed - using only PIEAPP for Phase 2
+        "lambda_pieapp": 0.3,  # PIEAPP perceptual loss weight (enabled for Phase 2)
 
     })
 

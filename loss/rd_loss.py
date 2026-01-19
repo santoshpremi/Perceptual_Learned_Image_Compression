@@ -6,14 +6,14 @@ from loss import perceptual_loss as ps
 
 from models.vgg import Vgg16 
 
-# Add imports for DISTS and PIEAPP
+# Add imports for PIEAPP
 try:
-    from piq import DISTS  # , PieAPP  # PIEAPP commented out for now
+    from piq import PieAPP  # PIEAPP enabled for Phase 2
     PIQ_AVAILABLE = True
 except ImportError:
     print("Warning: piq library not found. Install with: pip install piq")
     PIQ_AVAILABLE = False
-# PIEAPP removed temporarily - can be restored later 
+# DISTS removed - using only PIEAPP for Phase 2 
 
 class RateDistortionLoss(nn.Module):
     """Custom rate distortion loss with a Lagrangian parameter."""
@@ -202,29 +202,32 @@ class RateDistortionPOELICLoss(nn.Module):
 
 
 class RateDistortionPOELICLossPhase2(nn.Module):
-    """Phase 2 loss: Original HFLIC Phase 2 loss with Charbonnier and GAN.
+    """Phase 2 loss: Original HFLIC Phase 2 loss with MSE and GAN.
     
-    Uses Charbonnier loss (original HFLIC Phase 2) instead of Rate-Distortion loss.
-    Includes: Charbonnier + LPIPS + Style + GAN + Rate (BPP)
-    Note: DISTS computation is skipped to save memory (not used in original Phase 2 loss). PIEAPP is also disabled.
+    Uses MSE (Rate-Distortion) loss for Phase 2.
+    Includes: MSE (RD) + LPIPS + Style + GAN + Rate (BPP) + PIEAPP
+    Note: DISTS removed - using only PIEAPP for Phase 2.
     """
 
     def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None, metrics='mse'):
         super().__init__()
-        # Use MSE or MS-SSIM for rate-distortion loss (same as Phase 1)
+        # Use MSE for rate-distortion loss in Phase 2
         self.mse = nn.MSELoss()
-        # Add Charbonnier loss for original Phase 2
-        self.charbonnier = CharbonnierLoss()
         self.gan = GANLoss()
         self.style = StyleLoss()
         self.lpips = ps.PerceptualLoss(model='net-lin', net='vgg',
                                use_gpu=torch.cuda.is_available(), gpu_ids=gpu_id)
         
-        # Skip DISTS initialization for original Phase 2 to save GPU memory (0.5-2 GB)
-        # DISTS is only needed for enhanced Phase 2 with RD loss
+        # Initialize PIEAPP for Phase 2 (DISTS removed)
+        if PIQ_AVAILABLE:
+            self.pieapp = PieAPP().to(device).eval()
+            print("PIEAPP losses initialized successfully")
+        else:
+            self.pieapp = None
+            print("Warning: PIEAPP not available. Install piq library.")
+        
+        # DISTS removed - not used in Phase 2
         self.dists = None
-        self.pieapp = None
-        # Note: DISTS not initialized to save memory (not used in original Phase 2)
         
         print(gpu_id)
         self.lmbda = lmbda
@@ -244,24 +247,23 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         x_hat_feat = self.vgg(output["x_hat"])
         target_feat = self.vgg(target)
 
-        # Original Phase 2: Use Charbonnier loss (original HFLIC Phase 2)
-        out["charbonnier"] = self.charbonnier(output["x_hat"], target)
-        out["rd_loss"] = None  # Set to None to use Charbonnier branch in training
+        # Phase 2: Use MSE (Rate-Distortion) loss
+        out["rd_loss"] = self.mse(output["x_hat"], target)
+        out["charbonnier"] = None  # Not used in Phase 2
         
         out["lpips"] = self.lpips(output["x_hat"], target).mean()
         
-        # Skip DISTS computation for original Phase 2 to save memory (not used in loss)
-        # DISTS is only needed for enhanced Phase 2 with RD loss
+        # DISTS removed - not used in Phase 2
         out["dists"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
 
-        # Add PIEAPP loss (commented out for now)
-        # if self.pieapp is not None:
-        #     # PIEAPP expects images in [0, 1] range - clamp to ensure valid range
-        #     x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
-        #     target_clamped = torch.clamp(target, 0.0, 1.0)
-        #     out["pieapp"] = self.pieapp(x_hat_clamped, target_clamped)
-        # else:
-        out["pieapp"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
+        # Compute PIEAPP loss (enabled for Phase 2)
+        if self.pieapp is not None:
+            # PIEAPP expects images in [0, 1] range - clamp to ensure valid range
+            x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
+            target_clamped = torch.clamp(target, 0.0, 1.0)
+            out["pieapp"] = self.pieapp(x_hat_clamped, target_clamped)
+        else:
+            out["pieapp"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
         
         x_hat_feat = [feat for feat in x_hat_feat]
         target_feat = [feat for feat in target_feat]

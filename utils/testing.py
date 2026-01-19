@@ -9,6 +9,14 @@ from utils.func import image2patch, patch2image
 from loss.rd_loss import GANLoss
 from loss import perceptual_loss as ps
 
+# Import DISTS for validation metrics
+try:
+    from piq import DISTS
+    DISTS_AVAILABLE = True
+except ImportError:
+    DISTS_AVAILABLE = False
+    print("Warning: DISTS not available for validation. Install with: pip install piq")
+
 
 def test_one_epoch(epoch, test_dataloader, model, criterion, save_dir, logger_val, tb_logger, config=None):
     model.eval()
@@ -314,6 +322,12 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     device = next(model.parameters()).device
     gan_loss = GANLoss('hinge', loss_weight=2.0, real_label_val=1.0, fake_label_val=0.0)
 
+    # Initialize DISTS for validation metrics
+    if DISTS_AVAILABLE:
+        dists_metric = DISTS().to(device).eval()
+    else:
+        dists_metric = None
+
     loss = AverageMeter()
     bpp_loss = AverageMeter()
     charbonnier = AverageMeter()
@@ -322,8 +336,8 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     style_loss = AverageMeter() 
     adv_loss = AverageMeter() 
     aux_loss = AverageMeter()
-    dists = AverageMeter()
     pieapp = AverageMeter()
+    dists = AverageMeter()  # DISTS metric for validation
     psnr = AverageMeter()
     ms_ssim = AverageMeter()
 
@@ -358,45 +372,23 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
 
             pred_fake = model_disc(out_net["x_hat"])
             loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
-            # Phase 2: Use Rate-Distortion loss (same as Phase 1) + DISTS and PIEAPP losses
-            # Note: PIEAPP is currently disabled but can be restored later
+            # Phase 2: Use MSE (Rate-Distortion) loss + PIEAPP loss
             if config is not None:
-                # Check if using new RD loss or old Charbonnier (for backward compatibility)
-                if "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
-                    loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
-                                  config["lambda_lpips"] * out_criterion["lpips"] + 
-                                  config["lambda_style"] * out_criterion["style_loss"] + 
-                                  config["lambda_gan"] * loss_G_fake + 
-                                  config["lambda_rate"] * out_criterion["bpp_loss"] +
-                                  config.get("lambda_dists", 0.5) * out_criterion.get("dists", 0) +
-                                  config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))  # PIEAPP term kept but will be 0
-                else:
-                    # Fallback to Charbonnier if RD loss not available (backward compatibility)
-                    loss_G_total = (config.get("lambda_char", 2e-6) * out_criterion.get("charbonnier", 0) + 
-                                  config["lambda_lpips"] * out_criterion["lpips"] + 
-                                  config["lambda_style"] * out_criterion["style_loss"] + 
-                                  config["lambda_gan"] * loss_G_fake + 
-                                  config["lambda_rate"] * out_criterion["bpp_loss"] +
-                                  config.get("lambda_dists", 0.5) * out_criterion.get("dists", 0) +
-                                  config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))  # PIEAPP term kept but will be 0
+                # Phase 2 uses MSE (rd_loss) + PIEAPP
+                loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
+                              config["lambda_lpips"] * out_criterion["lpips"] + 
+                              config["lambda_style"] * out_criterion["style_loss"] + 
+                              config["lambda_gan"] * loss_G_fake + 
+                              config["lambda_rate"] * out_criterion["bpp_loss"] +
+                              config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))
             else:
                 # Default hardcoded values (for backward compatibility)
-                if "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
-                    loss_G_total = (out_criterion["rd_loss"] + 
-                                  2 * out_criterion["lpips"] + 
-                                  out_criterion["style_loss"] + 
-                                  loss_G_fake + 
-                                  out_criterion["bpp_loss"] +
-                                  0.5 * out_criterion.get("dists", 0) +
-                                  0.3 * out_criterion.get("pieapp", 0))  # PIEAPP term kept but will be 0
-                else:
-                    loss_G_total = (3e-4 * out_criterion.get("charbonnier", 0) + 
-                                  2 * out_criterion["lpips"] + 
-                                  out_criterion["style_loss"] + 
-                                  loss_G_fake + 
-                                  out_criterion["bpp_loss"] +
-                                  0.5 * out_criterion.get("dists", 0) +
-                                  0.3 * out_criterion.get("pieapp", 0))  # PIEAPP term kept but will be 0
+                loss_G_total = (out_criterion["rd_loss"] + 
+                              2 * out_criterion["lpips"] + 
+                              out_criterion["style_loss"] + 
+                              loss_G_fake + 
+                              out_criterion["bpp_loss"] +
+                              0.3 * out_criterion.get("pieapp", 0))
 
             aux_loss.update(model.aux_loss())
             bpp_loss.update(out_criterion["bpp_loss"].item())
@@ -404,20 +396,23 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
             lpips.update(out_criterion["lpips"].item())
             style_loss.update(out_criterion["style_loss"].item())
             adv_loss.update(loss_G_fake.item())
-            # Track RD loss if available, otherwise Charbonnier
+            # Track RD loss (MSE) for Phase 2
             if out_criterion.get("rd_loss") is not None:
                 rd_loss.update(out_criterion["rd_loss"].item())
             elif out_criterion.get("charbonnier") is not None:
                 charbonnier.update(out_criterion["charbonnier"].item())
-            if out_criterion.get("dists") is not None:
-                dists_val = out_criterion["dists"]
-                if isinstance(dists_val, torch.Tensor):
-                    dists.update(dists_val.item())
-            # PIEAPP tracking commented out for now
-            # if out_criterion.get("pieapp") is not None:
-            #     pieapp_val = out_criterion["pieapp"]
-            #     if isinstance(pieapp_val, torch.Tensor):
-            #         pieapp.update(pieapp_val.item())
+            if out_criterion.get("pieapp") is not None:
+                pieapp_val = out_criterion["pieapp"]
+                if isinstance(pieapp_val, torch.Tensor):
+                    pieapp.update(pieapp_val.item())
+            
+            # Compute DISTS metric for validation (evaluation only, not used in loss)
+            if dists_metric is not None:
+                # DISTS expects images in [0, 1] range
+                x_hat_clamped = torch.clamp(out_net['x_hat'], 0.0, 1.0)
+                target_clamped = torch.clamp(d, 0.0, 1.0)
+                dists_val = dists_metric(x_hat_clamped, target_clamped)
+                dists.update(dists_val.item())
 
             rec = torch2img(out_net['x_hat'])
             img = torch2img(d)
@@ -440,16 +435,15 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
         tb_logger.add_scalar('{}'.format('[val]: rd_loss'), rd_loss.avg, epoch + 1)
     if charbonnier.count > 0:
         tb_logger.add_scalar('{}'.format('[val]: charbonnier loss'), charbonnier.avg, epoch + 1)
+    if pieapp.count > 0:
+        tb_logger.add_scalar('{}'.format('[val]: pieapp loss'), pieapp.avg, epoch + 1)
     if dists.count > 0:
-        tb_logger.add_scalar('{}'.format('[val]: dists loss'), dists.avg, epoch + 1)
-    # PIEAPP logging commented out for now
-    # if pieapp.count > 0:
-    #     tb_logger.add_scalar('{}'.format('[val]: pieapp loss'), pieapp.avg, epoch + 1)
+        tb_logger.add_scalar('{}'.format('[val]: dists'), dists.avg, epoch + 1)
     
     rd_str = f"{rd_loss.avg:.4f}" if rd_loss.count > 0 else "N/A"
     charbonnier_str = f"{charbonnier.avg:.4f}" if charbonnier.count > 0 else "N/A"
+    pieapp_str = f"{pieapp.avg:.4f}" if pieapp.count > 0 else "N/A"
     dists_str = f"{dists.avg:.4f}" if dists.count > 0 else "N/A"
-    # pieapp_str = f"{pieapp.avg:.4f}" if pieapp.count > 0 else "N/A"  # PIEAPP commented out
     
     logger_val.info(
         f"Test epoch {epoch + 1}: Average losses: "
@@ -458,8 +452,8 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
         f"Charbonnier loss: {charbonnier_str} | "
         f"LPIPS loss: {lpips.avg:.4f} | "
         f"Style loss: {style_loss.avg:.4f} | "
-        f"DISTS loss: {dists_str} | "
-        # f"PIEAPP loss: {pieapp_str} | "  # PIEAPP commented out
+        f"PIEAPP loss: {pieapp_str} | "
+        f"DISTS: {dists_str} | "
         f"Adv loss: {adv_loss.avg:.4f} | "
         f"Bpp loss: {bpp_loss.avg:.4f} | "
         f"Aux loss: {aux_loss.avg:.2f} | "
