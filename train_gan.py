@@ -21,7 +21,7 @@ from loss.rd_loss import RateDistortionPOELICLossPhase2
 from utils.args import train_options
 from config.config_5group import model_config
 from models.models import ELIC
-from models.disc import Discriminator, init_weights
+from models.disc import Discriminator, MultiScaleDiscriminator, init_weights
 from datasets.open_images import OpenImagesDataset
 import random
 import numpy as np
@@ -110,7 +110,15 @@ def main():
     )
 
     net = ELIC(config=config)
-    net_disc = Discriminator()
+    
+    # Use Multi-Scale Discriminator for improved GAN stability (if enabled in config)
+    use_multi_scale = config.get("use_multi_scale_disc", True)
+    if use_multi_scale:
+        net_disc = MultiScaleDiscriminator(num_scales=3)
+        print("Using Multi-Scale Discriminator (3 scales) for GAN stability")
+    else:
+        net_disc = Discriminator()
+        print("Using single-scale Discriminator")
 
     if args.cuda and torch.cuda.device_count() > 1:
         net = CustomDataParallel(net)
@@ -122,13 +130,17 @@ def main():
     init_weights(net_disc, init_type='normal', init_gain=0.02)
 
     optimizer, aux_optimizer = configure_optimizers(net, args)
-    # lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, "min")
     lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[80, 100], gamma=0.1)
 
-    optimizer_D = torch.optim.Adam(net_disc.parameters(), lr=args.lr_D)
+    # TTUR: Two-Timescale Update Rule - Discriminator learns faster than Generator
+    # This helps maintain balance between G and D during training
+    ttur_ratio = config.get("ttur_ratio", 4.0)
+    lr_D = args.lr_D * ttur_ratio
+    optimizer_D = torch.optim.Adam(net_disc.parameters(), lr=lr_D)
     lr_scheduler_D = optim.lr_scheduler.MultiStepLR(optimizer_D, milestones=[80, 100], gamma=0.1)
+    print(f"TTUR enabled: Generator LR={args.learning_rate}, Discriminator LR={lr_D} (ratio={ttur_ratio}x)")
 
-    # Phase 2 loss: Enhanced perceptual loss with PIEAPP (DISTS removed)
+    # Phase 2 loss: Enhanced perceptual loss with TOPIQ-FR
     # Use Rate-Distortion (MSE/MS-SSIM) instead of Charbonnier for consistency with Phase 1
     # Use metrics='mse' for MSE-based or 'ms-ssim' for MS-SSIM based rate-distortion
     criterion = RateDistortionPOELICLossPhase2(lmbda=args.lmbda, device=device, gpu_id=args.gpu_id, metrics='mse')

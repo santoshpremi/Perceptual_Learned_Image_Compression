@@ -6,14 +6,15 @@ from loss import perceptual_loss as ps
 
 from models.vgg import Vgg16 
 
-# Add imports for PIEAPP
+# Add imports for pyiqa library
+# Using TOPIQ-FR only - state-of-the-art Full-Reference IQA metric from CVPR 2023
 try:
-    from piq import PieAPP  # PIEAPP enabled for Phase 2
-    PIQ_AVAILABLE = True
+    import pyiqa
+    PYIQA_AVAILABLE = True
+    print("pyiqa library loaded successfully")
 except ImportError:
-    print("Warning: piq library not found. Install with: pip install piq")
-    PIQ_AVAILABLE = False
-# DISTS removed - using only PIEAPP for Phase 2 
+    print("Warning: pyiqa library not found. Install with: pip install pyiqa")
+    PYIQA_AVAILABLE = False
 
 class RateDistortionLoss(nn.Module):
     """Custom rate distortion loss with a Lagrangian parameter."""
@@ -202,15 +203,19 @@ class RateDistortionPOELICLoss(nn.Module):
 
 
 class RateDistortionPOELICLossPhase2(nn.Module):
-    """Phase 2 loss: Original HFLIC Phase 2 loss with MSE and GAN.
+    """Phase 2 loss: Enhanced HFLIC Phase 2 loss with MSE, GAN, and TOPIQ-FR.
     
     Uses MSE (Rate-Distortion) loss for Phase 2.
-    Includes: MSE (RD) + LPIPS + Style + GAN + Rate (BPP) + PIEAPP
-    Note: DISTS removed - using only PIEAPP for Phase 2.
+    Includes: MSE (RD) + LPIPS + Style + GAN + Rate (BPP) + TOPIQ-FR
+    
+    Using pyiqa library for:
+    - TOPIQ-FR: State-of-the-art Full-Reference IQA metric from CVPR 2023
     """
 
     def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None, metrics='mse'):
         super().__init__()
+        self.device = device
+        
         # Use MSE for rate-distortion loss in Phase 2
         self.mse = nn.MSELoss()
         self.gan = GANLoss()
@@ -218,18 +223,22 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         self.lpips = ps.PerceptualLoss(model='net-lin', net='vgg',
                                use_gpu=torch.cuda.is_available(), gpu_ids=gpu_id)
         
-        # Initialize PIEAPP for Phase 2 (DISTS removed)
-        if PIQ_AVAILABLE:
-            self.pieapp = PieAPP().to(device).eval()
-            print("PIEAPP losses initialized successfully")
+        # Initialize TOPIQ-FR from pyiqa library
+        self.topiq = None
+        
+        if PYIQA_AVAILABLE:
+            try:
+                # TOPIQ-FR: State-of-the-art Full-Reference IQA (CVPR 2023)
+                # Higher is better - need to negate for loss
+                self.topiq = pyiqa.create_metric('topiq_fr', device=device)
+                print("pyiqa TOPIQ-FR initialized successfully")
+            except Exception as e:
+                print(f"Warning: Could not initialize pyiqa TOPIQ: {e}")
+                self.topiq = None
         else:
-            self.pieapp = None
-            print("Warning: PIEAPP not available. Install piq library.")
+            print("Warning: pyiqa not available. Install with: pip install pyiqa")
         
-        # DISTS removed - not used in Phase 2
-        self.dists = None
-        
-        print(gpu_id)
+        print(f"GPU IDs: {gpu_id}")
         self.lmbda = lmbda
         self.metrics = metrics
         self.vgg = Vgg16().to(device).eval()
@@ -253,17 +262,20 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         
         out["lpips"] = self.lpips(output["x_hat"], target).mean()
         
-        # DISTS removed - not used in Phase 2
-        out["dists"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
-
-        # Compute PIEAPP loss (enabled for Phase 2)
-        if self.pieapp is not None:
-            # PIEAPP expects images in [0, 1] range - clamp to ensure valid range
-            x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
-            target_clamped = torch.clamp(target, 0.0, 1.0)
-            out["pieapp"] = self.pieapp(x_hat_clamped, target_clamped)
+        # Clamp images to [0, 1] for perceptual metrics
+        x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
+        target_clamped = torch.clamp(target, 0.0, 1.0)
+        
+        # Compute TOPIQ-FR loss using pyiqa (state-of-the-art FR metric from CVPR 2023)
+        # TOPIQ is "higher is better" so negate for loss: loss = 1 - topiq
+        if self.topiq is not None:
+            try:
+                topiq_score = self.topiq(x_hat_clamped, target_clamped).mean()
+                out["topiq"] = 1.0 - topiq_score  # Convert to loss (lower is better)
+            except Exception as e:
+                out["topiq"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
         else:
-            out["pieapp"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
+            out["topiq"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
         
         x_hat_feat = [feat for feat in x_hat_feat]
         target_feat = [feat for feat in target_feat]

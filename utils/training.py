@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 #from utils.dist import *
 from loss.rd_loss import GANLoss
+from models.disc import r1_gradient_penalty, compute_discriminator_loss, compute_generator_loss
 
 
 def train_one_epoch(
@@ -125,52 +126,93 @@ def train_one_epoch(
 def train_one_epoch_gan(
     model, model_disc, criterion, train_dataloader, optimizer, aux_optimizer, optimizer_D, epoch, clip_max_norm, logger_train, tb_logger, current_step, config=None
 ):
+    """Enhanced Phase 2 GAN training with stability improvements.
+    
+    Includes:
+    - Multi-Scale Discriminator support
+    - R1 Gradient Penalty for GAN stability
+    - TTUR (Two-Timescale Update Rule) via different learning rates
+    - TOPIQ-FR perceptual loss (pyiqa)
+    """
     model.train()
     device = next(model.parameters()).device
     gan_loss = GANLoss('hinge', loss_weight=2.0, real_label_val=1.0, fake_label_val=0.0)
+    
+    # Get R1 penalty settings from config
+    use_r1 = config.get("use_r1_penalty", True) if config else True
+    r1_weight = config.get("r1_weight", 10.0) if config else 10.0
+    
     for i, d in enumerate(train_dataloader):
         d = d.to(device)
+        
+        # Enable gradients for R1 penalty computation
+        if use_r1:
+            d.requires_grad_(True)
 
         optimizer_D.zero_grad()
         
-        # 1.forward G
+        # 1. Forward Generator
         out_net = model(d)
-        # 2.backward netD
+        
+        # 2. Train Discriminator with R1 penalty
         pred_fake = model_disc(out_net["x_hat"].detach())
         pred_real = model_disc(d)
-
-        loss_D_real = gan_loss(pred_real, True, is_disc=True)
-        loss_D_fake = gan_loss(pred_fake, False,is_disc=True)
-        loss_D_total = (loss_D_real + loss_D_fake) * 0.5
+        
+        # Compute discriminator loss with optional R1 penalty
+        loss_D_total = compute_discriminator_loss(
+            pred_real, pred_fake, gan_loss,
+            real_img=d if use_r1 else None,
+            r1_weight=r1_weight,
+            use_r1=use_r1
+        )
         
         loss_D_total.backward()
         optimizer_D.step()
+        
+        # Disable gradients on input for generator training
+        if use_r1:
+            d.requires_grad_(False)
 
-        # 3.backward netG
+        # 3. Train Generator
         optimizer.zero_grad()
         aux_optimizer.zero_grad()
 
         pred_fake = model_disc(out_net["x_hat"])
-        loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
+        loss_G_fake = compute_generator_loss(pred_fake, gan_loss)
 
         out_criterion = criterion(out_net, d)
-        # Phase 2: Uses MSE (RD) + LPIPS + Style + GAN + Rate (BPP) + PIEAPP
+        
+        # Phase 2 Enhanced Loss: MSE + LPIPS + Style + GAN + BPP + TOPIQ-FR
         if config is not None:
-            # Phase 2 uses MSE (rd_loss) + PIEAPP
-            loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
-                          config["lambda_lpips"] * out_criterion["lpips"] + 
-                          config["lambda_style"] * out_criterion["style_loss"] + 
-                          config["lambda_gan"] * loss_G_fake + 
-                          config["lambda_rate"] * out_criterion["bpp_loss"] +
-                          config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))
+            # Get TOPIQ loss from criterion
+            topiq_val = out_criterion.get("topiq", 0)
+            
+            # Convert to tensor if needed
+            if not isinstance(topiq_val, torch.Tensor):
+                topiq_val = torch.tensor(0.0, device=device)
+            
+            loss_G_total = (
+                config.get("lambda_rd", 0.01) * out_criterion["rd_loss"] + 
+                config.get("lambda_lpips", 1.0) * out_criterion["lpips"] + 
+                config.get("lambda_style", 100.0) * out_criterion["style_loss"] + 
+                config.get("lambda_gan", 1.0) * loss_G_fake + 
+                config.get("lambda_rate", 0.3) * out_criterion["bpp_loss"] +
+                config.get("lambda_topiq", 0.5) * topiq_val
+            )
         else:
-            # Default hardcoded values (for backward compatibility)
-            loss_G_total = (out_criterion["rd_loss"] + 
-                          2 * out_criterion["lpips"] + 
-                          out_criterion["style_loss"] + 
-                          loss_G_fake + 
-                          out_criterion["bpp_loss"] +
-                          0.3 * out_criterion.get("pieapp", 0))
+            # Default values (matching successful DISTS experiment)
+            topiq_val = out_criterion.get("topiq", 0)
+            if not isinstance(topiq_val, torch.Tensor):
+                topiq_val = torch.tensor(0.0, device=device)
+            loss_G_total = (
+                0.01 * out_criterion["rd_loss"] + 
+                1.0 * out_criterion["lpips"] + 
+                100.0 * out_criterion["style_loss"] + 
+                1.0 * loss_G_fake + 
+                0.3 * out_criterion["bpp_loss"] +
+                0.5 * topiq_val
+            )
+        
         loss_G_total.backward()
 
         if clip_max_norm > 0:
@@ -183,37 +225,47 @@ def train_one_epoch_gan(
 
         current_step += 1
 
+        # TensorBoard logging
         if current_step % 100 == 0:
-            tb_logger.add_scalar('{}'.format('[train]: loss'), loss_G_total.item(), current_step)
-            tb_logger.add_scalar('{}'.format('[train]: bpp_loss'), out_criterion["bpp_loss"].item(), current_step)
-            tb_logger.add_scalar('{}'.format('[train]: lr'), optimizer.param_groups[0]['lr'], current_step)
-            tb_logger.add_scalar('{}'.format('[train]: aux_loss'), aux_loss.item(), current_step)
-            if out_criterion.get("rd_loss") is not None:
-                tb_logger.add_scalar('{}'.format('[train]: rd_loss'), out_criterion["rd_loss"].item(), current_step)
-            if out_criterion.get("pieapp") is not None and isinstance(out_criterion["pieapp"], torch.Tensor):
-                tb_logger.add_scalar('{}'.format('[train]: pieapp_loss'), out_criterion["pieapp"].item(), current_step)
-          
-        # print(out_criterion["loss"].size(),out_criterion["charbonnier"].size(),out_criterion["lpips"].size(),out_criterion["style_loss"].size())
-        if i % 100 == 0:
-                # Phase 2 uses MSE (rd_loss)
-                rd_str = f'{out_criterion["rd_loss"].item():.4f}'
-                pieapp_val = out_criterion.get("pieapp", 0)
-                pieapp_str = f'{pieapp_val.item():.4f}' if isinstance(pieapp_val, torch.Tensor) else '0.0000'
-                
-                logger_train.info(
-                    f"Train epoch {epoch + 1}: ["
-                    f"{i*len(d):5d}/{len(train_dataloader.dataset)}"
-                    f" ({100. * i / len(train_dataloader):.0f}%)] "
-                    f'Loss: {loss_G_total.item():.4f} | '
-                    f'MSE (RD) loss: {rd_str} | '
-                    f'LPIPS loss: {out_criterion["lpips"].item():.4f} | '
-                    f'Style loss: {out_criterion["style_loss"].item():.4f} | '
-                    f'PIEAPP loss: {pieapp_str} | '
-                    f'GAN loss: {loss_G_fake.item():.4f} | '
-                    f'Bpp loss: {out_criterion["bpp_loss"].item():.2f} | '
-                    f"Aux loss: {aux_loss.item():.2f}"
-                )
+            tb_logger.add_scalar('[train]: loss', loss_G_total.item(), current_step)
+            tb_logger.add_scalar('[train]: bpp_loss', out_criterion["bpp_loss"].item(), current_step)
+            tb_logger.add_scalar('[train]: lr', optimizer.param_groups[0]['lr'], current_step)
+            tb_logger.add_scalar('[train]: aux_loss', aux_loss.item(), current_step)
+            tb_logger.add_scalar('[train]: D_loss', loss_D_total.item(), current_step)
             
+            if out_criterion.get("rd_loss") is not None:
+                tb_logger.add_scalar('[train]: rd_loss', out_criterion["rd_loss"].item(), current_step)
+            if isinstance(out_criterion.get("topiq"), torch.Tensor):
+                tb_logger.add_scalar('[train]: topiq_loss', out_criterion["topiq"].item(), current_step)
+          
+        # Console logging
+        if i % 100 == 0:
+            rd_str = f'{out_criterion["rd_loss"].item():.4f}'
+            
+            # Get TOPIQ loss value
+            topiq_val = out_criterion.get("topiq", 0)
+            topiq_str = f'{topiq_val.item():.4f}' if isinstance(topiq_val, torch.Tensor) else '0.0000'
+            
+            # Handle multi-scale discriminator output for logging
+            if isinstance(loss_G_fake, torch.Tensor):
+                gan_str = f'{loss_G_fake.item():.4f}'
+            else:
+                gan_str = f'{loss_G_fake:.4f}'
+            
+            logger_train.info(
+                f"Train epoch {epoch + 1}: ["
+                f"{i*len(d):5d}/{len(train_dataloader.dataset)}"
+                f" ({100. * i / len(train_dataloader):.0f}%)] "
+                f'Loss: {loss_G_total.item():.4f} | '
+                f'RD: {rd_str} | '
+                f'LPIPS: {out_criterion["lpips"].item():.4f} | '
+                f'TOPIQ: {topiq_str} | '
+                f'Style: {out_criterion["style_loss"].item():.4f} | '
+                f'GAN: {gan_str} | '
+                f'D: {loss_D_total.item():.4f} | '
+                f'BPP: {out_criterion["bpp_loss"].item():.2f} | '
+                f"Aux: {aux_loss.item():.2f}"
+            )
 
     return current_step
 

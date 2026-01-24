@@ -8,6 +8,7 @@ from utils.utils import *
 from utils.func import image2patch, patch2image
 from loss.rd_loss import GANLoss
 from loss import perceptual_loss as ps
+from models.disc import compute_generator_loss
 
 
 def test_one_epoch(epoch, test_dataloader, model, criterion, save_dir, logger_val, tb_logger, config=None):
@@ -309,7 +310,14 @@ def test_model(test_dataloader, net, logger_test, save_dir, epoch, gpu_id):
    )
 
 
-def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save_dir, logger_val, tb_logger, config=None):
+def test_one_epoch_gan(epoch, test_dataloader, model, model_disc, criterion, save_dir, logger_val, tb_logger, config=None):
+    """Enhanced Phase 2 validation with Multi-Scale Discriminator and TOPIQ-FR.
+    
+    Supports:
+    - Multi-Scale Discriminator output handling
+    - TOPIQ-FR loss tracking (pyiqa - CVPR 2023)
+    - Backward compatible with single-scale discriminator
+    """
     model.eval()
     device = next(model.parameters()).device
     gan_loss = GANLoss('hinge', loss_weight=2.0, real_label_val=1.0, fake_label_val=0.0)
@@ -322,7 +330,7 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     style_loss = AverageMeter() 
     adv_loss = AverageMeter() 
     aux_loss = AverageMeter()
-    pieapp = AverageMeter()
+    topiq_loss = AverageMeter()
     psnr = AverageMeter()
     ms_ssim = AverageMeter()
 
@@ -352,44 +360,63 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
             if pad_h > 0 or pad_w > 0:
                 out_net['x_hat'] = out_net['x_hat'][:, :, :H, :W]
             
-            # Now compute loss with correctly sized tensors
+            # Compute perceptual losses
             out_criterion = criterion(out_net, d)
 
+            # Handle multi-scale discriminator output
             pred_fake = model_disc(out_net["x_hat"])
-            loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
-            # Phase 2: Use MSE (Rate-Distortion) loss + PIEAPP loss
+            loss_G_fake = compute_generator_loss(pred_fake, gan_loss)
+            
+            # Get TOPIQ loss value
+            topiq_val = out_criterion.get("topiq", 0)
+            
+            # Convert to tensor if needed
+            if not isinstance(topiq_val, torch.Tensor):
+                topiq_val = torch.tensor(0.0, device=device)
+            
+            # Phase 2 Enhanced Loss: MSE + LPIPS + Style + GAN + BPP + TOPIQ-FR
+            # Using weights matching successful DISTS experiment
             if config is not None:
-                # Phase 2 uses MSE (rd_loss) + PIEAPP
-                loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
-                              config["lambda_lpips"] * out_criterion["lpips"] + 
-                              config["lambda_style"] * out_criterion["style_loss"] + 
-                              config["lambda_gan"] * loss_G_fake + 
-                              config["lambda_rate"] * out_criterion["bpp_loss"] +
-                              config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))
+                loss_G_total = (
+                    config.get("lambda_rd", 0.01) * out_criterion["rd_loss"] + 
+                    config.get("lambda_lpips", 1.0) * out_criterion["lpips"] + 
+                    config.get("lambda_style", 100.0) * out_criterion["style_loss"] + 
+                    config.get("lambda_gan", 1.0) * loss_G_fake + 
+                    config.get("lambda_rate", 0.3) * out_criterion["bpp_loss"] +
+                    config.get("lambda_topiq", 0.5) * topiq_val
+                )
             else:
-                # Default hardcoded values (for backward compatibility)
-                loss_G_total = (out_criterion["rd_loss"] + 
-                              2 * out_criterion["lpips"] + 
-                              out_criterion["style_loss"] + 
-                              loss_G_fake + 
-                              out_criterion["bpp_loss"] +
-                              0.3 * out_criterion.get("pieapp", 0))
+                # Default values (matching successful DISTS experiment)
+                loss_G_total = (
+                    0.01 * out_criterion["rd_loss"] + 
+                    1.0 * out_criterion["lpips"] + 
+                    100.0 * out_criterion["style_loss"] + 
+                    1.0 * loss_G_fake + 
+                    0.3 * out_criterion["bpp_loss"] +
+                    0.5 * topiq_val
+                )
 
             aux_loss.update(model.aux_loss())
             bpp_loss.update(out_criterion["bpp_loss"].item())
             loss.update(loss_G_total.item())
             lpips.update(out_criterion["lpips"].item())
             style_loss.update(out_criterion["style_loss"].item())
-            adv_loss.update(loss_G_fake.item())
+            
+            # Handle multi-scale discriminator output for logging
+            if isinstance(loss_G_fake, torch.Tensor):
+                adv_loss.update(loss_G_fake.item())
+            else:
+                adv_loss.update(float(loss_G_fake))
+            
             # Track RD loss (MSE) for Phase 2
             if out_criterion.get("rd_loss") is not None:
                 rd_loss.update(out_criterion["rd_loss"].item())
             elif out_criterion.get("charbonnier") is not None:
                 charbonnier.update(out_criterion["charbonnier"].item())
-            if out_criterion.get("pieapp") is not None:
-                pieapp_val = out_criterion["pieapp"]
-                if isinstance(pieapp_val, torch.Tensor):
-                    pieapp.update(pieapp_val.item())
+            
+            # Track TOPIQ-FR loss
+            if isinstance(topiq_val, torch.Tensor) and topiq_val.item() > 0:
+                topiq_loss.update(topiq_val.item())
 
             rec = torch2img(out_net['x_hat'])
             img = torch2img(d)
@@ -402,22 +429,26 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
             rec.save(os.path.join(save_dir, '%03d_rec.png' % i))
             img.save(os.path.join(save_dir, '%03d_gt.png' % i))
 
-    tb_logger.add_scalar('{}'.format('[val]: loss'), loss.avg, epoch + 1)
-    tb_logger.add_scalar('{}'.format('[val]: bpp_loss'), bpp_loss.avg, epoch + 1)
-    tb_logger.add_scalar('{}'.format('[val]: psnr'), psnr.avg, epoch + 1)
-    tb_logger.add_scalar('{}'.format('[val]: ms-ssim'), ms_ssim.avg, epoch + 1)
-    tb_logger.add_scalar('{}'.format('[val]: lpips'), lpips.avg, epoch + 1)
-    tb_logger.add_scalar('{}'.format('[val]: style loss'), style_loss.avg, epoch + 1)
-    if rd_loss.count > 0:
-        tb_logger.add_scalar('{}'.format('[val]: rd_loss'), rd_loss.avg, epoch + 1)
-    if charbonnier.count > 0:
-        tb_logger.add_scalar('{}'.format('[val]: charbonnier loss'), charbonnier.avg, epoch + 1)
-    if pieapp.count > 0:
-        tb_logger.add_scalar('{}'.format('[val]: pieapp loss'), pieapp.avg, epoch + 1)
+    # TensorBoard logging
+    tb_logger.add_scalar('[val]: loss', loss.avg, epoch + 1)
+    tb_logger.add_scalar('[val]: bpp_loss', bpp_loss.avg, epoch + 1)
+    tb_logger.add_scalar('[val]: psnr', psnr.avg, epoch + 1)
+    tb_logger.add_scalar('[val]: ms-ssim', ms_ssim.avg, epoch + 1)
+    tb_logger.add_scalar('[val]: lpips', lpips.avg, epoch + 1)
+    tb_logger.add_scalar('[val]: style loss', style_loss.avg, epoch + 1)
+    tb_logger.add_scalar('[val]: adv_loss', adv_loss.avg, epoch + 1)
     
+    if rd_loss.count > 0:
+        tb_logger.add_scalar('[val]: rd_loss', rd_loss.avg, epoch + 1)
+    if charbonnier.count > 0:
+        tb_logger.add_scalar('[val]: charbonnier loss', charbonnier.avg, epoch + 1)
+    if topiq_loss.count > 0:
+        tb_logger.add_scalar('[val]: topiq_loss', topiq_loss.avg, epoch + 1)
+    
+    # Console logging
     rd_str = f"{rd_loss.avg:.4f}" if rd_loss.count > 0 else "N/A"
     charbonnier_str = f"{charbonnier.avg:.4f}" if charbonnier.count > 0 else "N/A"
-    pieapp_str = f"{pieapp.avg:.4f}" if pieapp.count > 0 else "N/A"
+    topiq_str = f"{topiq_loss.avg:.4f}" if topiq_loss.count > 0 else "0.0000"
     
     logger_val.info(
         f"Test epoch {epoch + 1}: Average losses: "
@@ -426,7 +457,7 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
         f"Charbonnier loss: {charbonnier_str} | "
         f"LPIPS loss: {lpips.avg:.4f} | "
         f"Style loss: {style_loss.avg:.4f} | "
-        f"PIEAPP loss: {pieapp_str} | "
+        f"TOPIQ loss: {topiq_str} | "
         f"Adv loss: {adv_loss.avg:.4f} | "
         f"Bpp loss: {bpp_loss.avg:.4f} | "
         f"Aux loss: {aux_loss.avg:.2f} | "

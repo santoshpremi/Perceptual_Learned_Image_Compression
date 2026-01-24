@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.nn import init
 
-from torch.nn.utils import  spectral_norm
+from torch.nn.utils import spectral_norm
 
 def init_weights(net, init_type='normal', init_gain=0.02):
     """Initialize network weights.
@@ -143,3 +144,147 @@ class Discriminator(nn.Module):
         x = torch.sigmoid(x)
 
         return x
+
+
+class MultiScaleDiscriminator(nn.Module):
+    """Multi-Scale Discriminator for GAN stability.
+    
+    Uses multiple discriminators at different scales to provide feedback
+    on both global structure (low frequency) and fine texture (high frequency).
+    This helps prevent mode collapse and improves training stability.
+    
+    Reference: "High-Resolution Image Synthesis and Semantic Manipulation with Conditional GANs"
+    """
+    
+    def __init__(self, num_scales=3, nch_in=3, nch_ker=64, norm='bnorm'):
+        super(MultiScaleDiscriminator, self).__init__()
+        
+        self.num_scales = num_scales
+        
+        # Create discriminators for each scale
+        self.discriminators = nn.ModuleList([
+            Discriminator(nch_in=nch_in, nch_ker=nch_ker, norm=norm)
+            for _ in range(num_scales)
+        ])
+        
+        # Downsampling layer for multi-scale processing
+        self.downsample = nn.AvgPool2d(3, stride=2, padding=1, count_include_pad=False)
+    
+    def forward(self, x):
+        """Forward pass through all scales.
+        
+        Args:
+            x: Input tensor of shape (B, C, H, W)
+            
+        Returns:
+            List of discriminator outputs at each scale
+        """
+        outputs = []
+        for i, disc in enumerate(self.discriminators):
+            outputs.append(disc(x))
+            if i < self.num_scales - 1:  # Don't downsample after last discriminator
+                x = self.downsample(x)
+        return outputs
+
+
+def r1_gradient_penalty(real_pred, real_img, weight=10.0):
+    """R1 Gradient Penalty for GAN training stability.
+    
+    Penalizes the discriminator for having large gradients on real images,
+    which helps prevent the discriminator from becoming too strong and
+    causing training instability.
+    
+    Reference: "Which Training Methods for GANs do actually Converge?"
+    
+    Args:
+        real_pred: Discriminator prediction on real images
+        real_img: Real image tensor (requires_grad=True)
+        weight: Penalty weight (default: 10.0)
+        
+    Returns:
+        R1 gradient penalty loss
+    """
+    # Handle multi-scale discriminator output
+    if isinstance(real_pred, list):
+        # Average penalty across all scales
+        penalty = 0.0
+        for pred in real_pred:
+            grad_real, = torch.autograd.grad(
+                outputs=pred.sum(),
+                inputs=real_img,
+                create_graph=True,
+                retain_graph=True,
+                only_inputs=True
+            )
+            penalty += grad_real.pow(2).reshape(grad_real.shape[0], -1).sum(1).mean()
+        penalty = penalty / len(real_pred)
+    else:
+        grad_real, = torch.autograd.grad(
+            outputs=real_pred.sum(),
+            inputs=real_img,
+            create_graph=True,
+            retain_graph=True,
+            only_inputs=True
+        )
+        penalty = grad_real.pow(2).reshape(grad_real.shape[0], -1).sum(1).mean()
+    
+    return weight * penalty
+
+
+def compute_discriminator_loss(pred_real, pred_fake, gan_loss_fn, real_img=None, r1_weight=10.0, use_r1=True):
+    """Compute total discriminator loss with optional R1 penalty.
+    
+    Args:
+        pred_real: Discriminator predictions on real images
+        pred_fake: Discriminator predictions on fake images
+        gan_loss_fn: GAN loss function
+        real_img: Real images (needed for R1 penalty, requires_grad=True)
+        r1_weight: R1 penalty weight
+        use_r1: Whether to apply R1 gradient penalty
+        
+    Returns:
+        Total discriminator loss
+    """
+    # Handle multi-scale discriminator
+    if isinstance(pred_real, list):
+        loss_D_real = 0.0
+        loss_D_fake = 0.0
+        for pred_r, pred_f in zip(pred_real, pred_fake):
+            loss_D_real += gan_loss_fn(pred_r, True, is_disc=True)
+            loss_D_fake += gan_loss_fn(pred_f, False, is_disc=True)
+        loss_D_real = loss_D_real / len(pred_real)
+        loss_D_fake = loss_D_fake / len(pred_fake)
+    else:
+        loss_D_real = gan_loss_fn(pred_real, True, is_disc=True)
+        loss_D_fake = gan_loss_fn(pred_fake, False, is_disc=True)
+    
+    loss_D_total = (loss_D_real + loss_D_fake) * 0.5
+    
+    # Add R1 gradient penalty
+    if use_r1 and real_img is not None:
+        r1_loss = r1_gradient_penalty(pred_real, real_img, weight=r1_weight)
+        loss_D_total = loss_D_total + r1_loss
+    
+    return loss_D_total
+
+
+def compute_generator_loss(pred_fake, gan_loss_fn):
+    """Compute generator adversarial loss.
+    
+    Args:
+        pred_fake: Discriminator predictions on fake images
+        gan_loss_fn: GAN loss function
+        
+    Returns:
+        Generator adversarial loss
+    """
+    # Handle multi-scale discriminator
+    if isinstance(pred_fake, list):
+        loss_G = 0.0
+        for pred_f in pred_fake:
+            loss_G += gan_loss_fn(pred_f, False, is_disc=False)
+        loss_G = loss_G / len(pred_fake)
+    else:
+        loss_G = gan_loss_fn(pred_fake, False, is_disc=False)
+    
+    return loss_G
