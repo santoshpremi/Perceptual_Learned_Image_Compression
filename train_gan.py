@@ -41,10 +41,12 @@ def setup_seed(seed=3407):
     return seed 
 
 def main():
-    torch.backends.cudnn.benchmark = True
     ImageFile.LOAD_TRUNCATED_IMAGES = True
     Image.MAX_IMAGE_PIXELS = None
     seed =  setup_seed()
+    
+    # Enable cuDNN benchmark for faster training (after setup_seed to override)
+    torch.backends.cudnn.benchmark = True
     args = train_options()
     config = model_config()
 
