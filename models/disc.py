@@ -282,9 +282,11 @@ def compute_generator_loss(pred_fake, gan_loss_fn):
     if isinstance(pred_fake, list):
         loss_G = 0.0
         for pred_f in pred_fake:
-            loss_G += gan_loss_fn(pred_f, False, is_disc=False)
+            # Generator wants D to think fake images are REAL
+            loss_G += gan_loss_fn(pred_f, True, is_disc=False)
         loss_G = loss_G / len(pred_fake)
     else:
-        loss_G = gan_loss_fn(pred_fake, False, is_disc=False)
+        # Generator wants D to think fake images are REAL
+        loss_G = gan_loss_fn(pred_fake, True, is_disc=False)
     
     return loss_G
