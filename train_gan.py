@@ -37,7 +37,8 @@ def setup_seed(seed=3407):
     random.seed(seed)
 
     torch.backends.cudnn.benchmark = False
-    torch.backends.cudnn.enable = False
+    torch.backends.cudnn.enabled = False
+    torch.backends.cudnn.deterministic = True
     return seed 
 
 def main():

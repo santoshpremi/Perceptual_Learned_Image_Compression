@@ -518,7 +518,8 @@ def test_one_epoch_gan_face(epoch, test_dataloader, model, model_disc,criterion,
             out_criterion = criterion(out_net, img, mask)
 
             pred_fake = model_disc(out_criterion["x_tidle"])
-            loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
+            # Generator wants D to think fake images are REAL
+            loss_G_fake = gan_loss(pred_fake, True, is_disc=False)
             loss_G_total = (config["lambda_char"]* out_criterion["charbonnier"] + config["lambda_lpips"] * out_criterion["lpips"] + config["lambda_style"] * out_criterion["style_loss"] + config["lambda_gan"] * loss_G_fake +  out_criterion["bpp_loss"] + config["lambda_face"] * out_criterion["face_loss"])
             
             out_criterion["loss"] =  torch.mean(loss_G_total)
