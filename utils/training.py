@@ -241,7 +241,7 @@ def train_one_epoch_gan(
           
         # Console logging
         if i % 100 == 0:
-                rd_str = f'{out_criterion["rd_loss"].item():.4f}'
+            rd_str = f'{out_criterion["rd_loss"].item():.4f}'
             
             # Get TOPIQ loss value
             topiq_val = out_criterion.get("topiq", 0)
@@ -253,11 +253,11 @@ def train_one_epoch_gan(
             else:
                 gan_str = f'{loss_G_fake:.4f}'
                 
-                logger_train.info(
-                    f"Train epoch {epoch + 1}: ["
-                    f"{i*len(d):5d}/{len(train_dataloader.dataset)}"
-                    f" ({100. * i / len(train_dataloader):.0f}%)] "
-                    f'Loss: {loss_G_total.item():.4f} | '
+            logger_train.info(
+                f"Train epoch {epoch + 1}: ["
+                f"{i*len(d):5d}/{len(train_dataloader.dataset)}"
+                f" ({100. * i / len(train_dataloader):.0f}%)] "
+                f'Loss: {loss_G_total.item():.4f} | '
                 f'RD: {rd_str} | '
                 f'LPIPS: {out_criterion["lpips"].item():.4f} | '
                 f'TOPIQ: {topiq_str} | '
@@ -266,7 +266,7 @@ def train_one_epoch_gan(
                 f'D: {loss_D_total.item():.4f} | '
                 f'BPP: {out_criterion["bpp_loss"].item():.2f} | '
                 f"Aux: {aux_loss.item():.2f}"
-                )
+            )
 
     return current_step
 
