@@ -136,7 +136,8 @@ def train_one_epoch_gan(
     """
     model.train()
     device = next(model.parameters()).device
-    gan_loss = GANLoss('hinge', loss_weight=2.0, real_label_val=1.0, fake_label_val=0.0)
+    # Using 'vanilla' (BCE) loss to match original HFLIC with sigmoid discriminator
+    gan_loss = GANLoss('vanilla', loss_weight=2.0, real_label_val=1.0, fake_label_val=0.0)
     
     # Get R1 penalty settings from config
     use_r1 = config.get("use_r1_penalty", True) if config else True
@@ -157,7 +158,7 @@ def train_one_epoch_gan(
         # 2. Train Discriminator with R1 penalty
         pred_fake = model_disc(out_net["x_hat"].detach())
         pred_real = model_disc(d)
-        
+
         # Compute discriminator loss with optional R1 penalty
         loss_D_total = compute_discriminator_loss(
             pred_real, pred_fake, gan_loss,
@@ -168,7 +169,7 @@ def train_one_epoch_gan(
         
         loss_D_total.backward()
         optimizer_D.step()
-        
+
         # Disable gradients on input for generator training
         if use_r1:
             d.requires_grad_(False)
@@ -240,7 +241,7 @@ def train_one_epoch_gan(
           
         # Console logging
         if i % 100 == 0:
-            rd_str = f'{out_criterion["rd_loss"].item():.4f}'
+                rd_str = f'{out_criterion["rd_loss"].item():.4f}'
             
             # Get TOPIQ loss value
             topiq_val = out_criterion.get("topiq", 0)
@@ -251,12 +252,12 @@ def train_one_epoch_gan(
                 gan_str = f'{loss_G_fake.item():.4f}'
             else:
                 gan_str = f'{loss_G_fake:.4f}'
-            
-            logger_train.info(
-                f"Train epoch {epoch + 1}: ["
-                f"{i*len(d):5d}/{len(train_dataloader.dataset)}"
-                f" ({100. * i / len(train_dataloader):.0f}%)] "
-                f'Loss: {loss_G_total.item():.4f} | '
+                
+                logger_train.info(
+                    f"Train epoch {epoch + 1}: ["
+                    f"{i*len(d):5d}/{len(train_dataloader.dataset)}"
+                    f" ({100. * i / len(train_dataloader):.0f}%)] "
+                    f'Loss: {loss_G_total.item():.4f} | '
                 f'RD: {rd_str} | '
                 f'LPIPS: {out_criterion["lpips"].item():.4f} | '
                 f'TOPIQ: {topiq_str} | '
@@ -265,7 +266,7 @@ def train_one_epoch_gan(
                 f'D: {loss_D_total.item():.4f} | '
                 f'BPP: {out_criterion["bpp_loss"].item():.2f} | '
                 f"Aux: {aux_loss.item():.2f}"
-            )
+                )
 
     return current_step
 
@@ -274,7 +275,8 @@ def train_one_epoch_gan_face(
 ):
     model.train()
     device = next(model.parameters()).device
-    gan_loss = GANLoss('hinge', loss_weight=2.0, real_label_val=1.0, fake_label_val=0.0)
+    # Using 'vanilla' (BCE) loss to match original HFLIC with sigmoid discriminator
+    gan_loss = GANLoss('vanilla', loss_weight=2.0, real_label_val=1.0, fake_label_val=0.0)
     for i, d in enumerate(train_dataloader):
         d = d.to(device)
         mask = d[:, 3:, :, :]   # /255.0     mask_roi

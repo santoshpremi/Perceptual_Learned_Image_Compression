@@ -60,8 +60,13 @@ class CharbonnierLoss(nn.Module):
     
 class GANLoss(nn.Module):
     """Define GAN loss.
+    
+    IMPORTANT: Using 'vanilla' (BCE) loss to match original HFLIC paper.
+    Original HFLIC uses sigmoid discriminator output with non-saturating GAN loss.
+    Reference: https://github.com/beiluo97/HFLIC
+    
     Args:
-        gan_type (str): Support 'vanilla', 'lsgan', 'wgan', 'hinge'.
+        gan_type (str): Support 'vanilla' (BCE), 'hinge'. Default: 'vanilla' for HFLIC.
         real_label_val (float): The value for real label. Default: 1.0.
         fake_label_val (float): The value for fake label. Default: 0.0.
         loss_weight (float): Loss weight. Default: 1.0.
@@ -70,7 +75,7 @@ class GANLoss(nn.Module):
     """
 
     def __init__(self,
-                 gan_type = 'hinge',
+                 gan_type='vanilla',  # Changed from 'hinge' to 'vanilla' to match original HFLIC
                  real_label_val=1.0,
                  fake_label_val=0.0,
                  loss_weight=1.0):
@@ -80,7 +85,12 @@ class GANLoss(nn.Module):
         self.fake_label_val = fake_label_val
         self.loss_weight = loss_weight
 
-        if self.gan_type == 'hinge':
+        if self.gan_type == 'vanilla':
+            # Non-saturating GAN loss (BCE) - matches original HFLIC/HiFiC
+            # Works with sigmoid discriminator output [0, 1]
+            self.loss = nn.BCELoss()
+        elif self.gan_type == 'hinge':
+            # Hinge loss - requires unbounded logits (no sigmoid)
             self.loss = nn.ReLU()
         else:
             raise NotImplementedError(
@@ -94,7 +104,6 @@ class GANLoss(nn.Module):
         Returns:
             Tensor: wgan loss.
         """
-
         return -input.mean() if target else input.mean()
 
     def get_target_label(self, input, target_is_real):
@@ -106,7 +115,6 @@ class GANLoss(nn.Module):
             (bool | Tensor): Target tensor. Return bool for wgan, otherwise,
                 return Tensor.
         """
-
         target_val = (
             self.real_label_val if target_is_real else self.fake_label_val)
         return input.new_ones(input.size()) * target_val
@@ -122,15 +130,19 @@ class GANLoss(nn.Module):
         Returns:
             Tensor: GAN loss value.
         """
-
         target_label = self.get_target_label(input, target_is_real)
-        if self.gan_type == 'hinge':
+        
+        if self.gan_type == 'vanilla':
+            # BCE loss for non-saturating GAN (original HFLIC)
+            # Works with sigmoid discriminator output
+            loss = self.loss(input, target_label)
+        elif self.gan_type == 'hinge':
             if is_disc:  # for discriminators in hinge-gan
                 input = -input if target_is_real else input
                 loss = self.loss(1 + input).mean()
             else:  # for generators in hinge-gan
                 loss = -input.mean()
-        else:  # other gan types
+        else:
             loss = self.loss(input, target_label)
 
         # loss_weight is always 1.0 for discriminators
