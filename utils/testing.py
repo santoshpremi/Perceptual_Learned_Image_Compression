@@ -405,7 +405,7 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc, criterion, sav
             
             # Handle multi-scale discriminator output for logging
             if isinstance(loss_G_fake, torch.Tensor):
-            adv_loss.update(loss_G_fake.item())
+                adv_loss.update(loss_G_fake.item())
             else:
                 adv_loss.update(float(loss_G_fake))
             
