@@ -275,8 +275,8 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         out["lpips"] = self.lpips(output["x_hat"], target).mean()
         
         # Clamp images to [0, 1] for perceptual metrics
-            x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
-            target_clamped = torch.clamp(target, 0.0, 1.0)
+        x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
+        target_clamped = torch.clamp(target, 0.0, 1.0)
         
         # Compute TOPIQ-FR loss using pyiqa (state-of-the-art FR metric from CVPR 2023)
         # TOPIQ is "higher is better" so negate for loss: loss = 1 - topiq
