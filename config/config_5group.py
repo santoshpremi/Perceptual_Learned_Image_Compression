@@ -25,13 +25,13 @@ def model_config():
         "lambda_rd": 0.01,     # MSE for pixel-level fidelity
         "lambda_face": 0,      # Face-specific loss (disabled)
         
-        # GAN Training (with stability improvements)
-        # Using lambda_gan=1.0 (same as DISTS experiment) - stability handled by Multi-Scale D + TTUR + R1
-        "lambda_gan": 1.0,     # Adversarial loss weight (matching successful DISTS config)
-        "use_multi_scale_disc": True,  # Enable Multi-Scale Discriminator
-        "use_r1_penalty": True,        # Enable R1 gradient penalty
+        # GAN Training (Conservative approach for stability)
+        # lambda_gan reduced to 0.1 to prevent PSNR collapse while maintaining perceptual benefits
+        "lambda_gan": 0.1,     # Reduced from 1.0 to prevent PSNR degradation
+        "use_multi_scale_disc": False,  # Single-scale discriminator (faster, matches original HFLIC)
+        "use_r1_penalty": True,        # Keep R1 gradient penalty for stability
         "r1_weight": 10.0,             # R1 penalty weight
-        "ttur_ratio": 4.0,             # TTUR: D learning rate = G learning rate * ttur_ratio
+        "ttur_ratio": 1.0,             # Standard training (reduced from 4.0)
         
         # TOPIQ-FR: State-of-the-art FR metric from CVPR 2023
         # Using pyiqa library for IQA metrics

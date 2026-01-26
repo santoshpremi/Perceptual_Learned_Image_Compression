@@ -114,14 +114,14 @@ def main():
 
     net = ELIC(config=config)
     
-    # Use Multi-Scale Discriminator for improved GAN stability (if enabled in config)
-    use_multi_scale = config.get("use_multi_scale_disc", True)
+    # Discriminator selection (single-scale by default, matches original HFLIC)
+    use_multi_scale = config.get("use_multi_scale_disc", False)
     if use_multi_scale:
         net_disc = MultiScaleDiscriminator(num_scales=3)
-        print("Using Multi-Scale Discriminator (3 scales) for GAN stability")
+        print("Using Multi-Scale Discriminator (3 scales)")
     else:
         net_disc = Discriminator()
-        print("Using single-scale Discriminator")
+        print("Using Single-Scale Discriminator (Standard HFLIC)")
 
     if args.cuda and torch.cuda.device_count() > 1:
         net = CustomDataParallel(net)
@@ -135,13 +135,13 @@ def main():
     optimizer, aux_optimizer = configure_optimizers(net, args)
     lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[80, 100], gamma=0.1)
 
-    # TTUR: Two-Timescale Update Rule - Discriminator learns faster than Generator
-    # This helps maintain balance between G and D during training
-    ttur_ratio = config.get("ttur_ratio", 4.0)
+    # TTUR: Two-Timescale Update Rule (optional)
+    # ratio=1.0 means standard training (G and D same LR)
+    ttur_ratio = config.get("ttur_ratio", 1.0)
     lr_D = args.lr_D * ttur_ratio
     optimizer_D = torch.optim.Adam(net_disc.parameters(), lr=lr_D)
     lr_scheduler_D = optim.lr_scheduler.MultiStepLR(optimizer_D, milestones=[80, 100], gamma=0.1)
-    print(f"TTUR enabled: Generator LR={args.learning_rate}, Discriminator LR={lr_D} (ratio={ttur_ratio}x)")
+    print(f"Generator LR={args.learning_rate}, Discriminator LR={lr_D} (TTUR ratio={ttur_ratio}x)")
 
     # Phase 2 loss: Enhanced perceptual loss with TOPIQ-FR
     # Use Rate-Distortion (MSE/MS-SSIM) instead of Charbonnier for consistency with Phase 1

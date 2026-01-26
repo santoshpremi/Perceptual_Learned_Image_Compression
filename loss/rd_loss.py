@@ -61,12 +61,11 @@ class CharbonnierLoss(nn.Module):
 class GANLoss(nn.Module):
     """Define GAN loss.
     
-    IMPORTANT: Using 'vanilla' (BCE) loss to match original HFLIC paper.
-    Original HFLIC uses sigmoid discriminator output with non-saturating GAN loss.
+    Using 'hinge' loss to match original HFLIC implementation.
     Reference: https://github.com/beiluo97/HFLIC
     
     Args:
-        gan_type (str): Support 'vanilla' (BCE), 'hinge'. Default: 'vanilla' for HFLIC.
+        gan_type (str): Support 'vanilla' (BCE), 'hinge'. Default: 'hinge' for HFLIC.
         real_label_val (float): The value for real label. Default: 1.0.
         fake_label_val (float): The value for fake label. Default: 0.0.
         loss_weight (float): Loss weight. Default: 1.0.
@@ -75,7 +74,7 @@ class GANLoss(nn.Module):
     """
 
     def __init__(self,
-                 gan_type='vanilla',  # Changed from 'hinge' to 'vanilla' to match original HFLIC
+                 gan_type='hinge',  # Original HFLIC uses hinge loss
                  real_label_val=1.0,
                  fake_label_val=0.0,
                  loss_weight=1.0):
@@ -86,11 +85,11 @@ class GANLoss(nn.Module):
         self.loss_weight = loss_weight
 
         if self.gan_type == 'vanilla':
-            # Non-saturating GAN loss (BCE) - matches original HFLIC/HiFiC
+            # Non-saturating GAN loss (BCE)
             # Works with sigmoid discriminator output [0, 1]
             self.loss = nn.BCELoss()
         elif self.gan_type == 'hinge':
-            # Hinge loss - requires unbounded logits (no sigmoid)
+            # Hinge loss - original HFLIC default
             self.loss = nn.ReLU()
         else:
             raise NotImplementedError(
@@ -133,10 +132,11 @@ class GANLoss(nn.Module):
         target_label = self.get_target_label(input, target_is_real)
         
         if self.gan_type == 'vanilla':
-            # BCE loss for non-saturating GAN (original HFLIC)
+            # BCE loss for non-saturating GAN
             # Works with sigmoid discriminator output
             loss = self.loss(input, target_label)
         elif self.gan_type == 'hinge':
+            # Hinge loss (original HFLIC default)
             if is_disc:  # for discriminators in hinge-gan
                 input = -input if target_is_real else input
                 loss = self.loss(1 + input).mean()
@@ -275,8 +275,8 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         out["lpips"] = self.lpips(output["x_hat"], target).mean()
         
         # Clamp images to [0, 1] for perceptual metrics
-        x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
-        target_clamped = torch.clamp(target, 0.0, 1.0)
+            x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
+            target_clamped = torch.clamp(target, 0.0, 1.0)
         
         # Compute TOPIQ-FR loss using pyiqa (state-of-the-art FR metric from CVPR 2023)
         # TOPIQ is "higher is better" so negate for loss: loss = 1 - topiq
