@@ -46,8 +46,15 @@ def main():
     Image.MAX_IMAGE_PIXELS = None
     seed =  setup_seed()
     
-    # Enable cuDNN benchmark for faster training (after setup_seed to override)
-    torch.backends.cudnn.benchmark = True
+    # Speed optimizations (override setup_seed settings)
+    torch.backends.cudnn.enabled = True      # Re-enable cuDNN
+    torch.backends.cudnn.benchmark = True    # Auto-tune kernels
+    torch.backends.cudnn.deterministic = False  # Allow non-deterministic for speed
+    
+    # TF32 for Ampere GPUs (RTX 30xx) - faster matmul with minimal precision loss
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    
     args = train_options()
     config = model_config()
 
@@ -102,6 +109,8 @@ def main():
         num_workers=args.num_workers,
         shuffle=True,
         pin_memory=(device == "cuda"),
+        persistent_workers=True if args.num_workers > 0 else False,
+        prefetch_factor=4 if args.num_workers > 0 else None,
     )
 
     test_dataloader = DataLoader(
@@ -110,6 +119,8 @@ def main():
         num_workers=args.num_workers,
         shuffle=False,
         pin_memory=(device == "cuda"),
+        persistent_workers=True if args.num_workers > 0 else False,
+        prefetch_factor=4 if args.num_workers > 0 else None,
     )
 
     net = ELIC(config=config)
