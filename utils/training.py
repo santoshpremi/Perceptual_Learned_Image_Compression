@@ -136,8 +136,8 @@ def train_one_epoch_gan(
     """
     model.train()
     device = next(model.parameters()).device
-    # Using 'vanilla' (BCE) loss to match original HFLIC with sigmoid discriminator
-    gan_loss = GANLoss('vanilla', loss_weight=2.0, real_label_val=1.0, fake_label_val=0.0)
+    # Using 'hinge' loss to match original HFLIC
+    gan_loss = GANLoss('hinge', loss_weight=1.0, real_label_val=1.0, fake_label_val=0.0)
     
     # Get R1 penalty settings from config
     use_r1 = config.get("use_r1_penalty", True) if config else True
@@ -275,8 +275,8 @@ def train_one_epoch_gan_face(
 ):
     model.train()
     device = next(model.parameters()).device
-    # Using 'vanilla' (BCE) loss to match original HFLIC with sigmoid discriminator
-    gan_loss = GANLoss('vanilla', loss_weight=2.0, real_label_val=1.0, fake_label_val=0.0)
+    # Using 'hinge' loss to match original HFLIC
+    gan_loss = GANLoss('hinge', loss_weight=1.0, real_label_val=1.0, fake_label_val=0.0)
     for i, d in enumerate(train_dataloader):
         d = d.to(device)
         mask = d[:, 3:, :, :]   # /255.0     mask_roi
