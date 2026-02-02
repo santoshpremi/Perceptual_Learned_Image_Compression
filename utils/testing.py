@@ -319,11 +319,18 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     charbonnier = AverageMeter()
     rd_loss = AverageMeter()
     dists = AverageMeter()
+    lpips = AverageMeter()
     style_loss = AverageMeter() 
     adv_loss = AverageMeter() 
     aux_loss = AverageMeter()
     psnr = AverageMeter()
     ms_ssim = AverageMeter()
+    
+    # Initialize LPIPS model for Phase 2 validation
+    lpips_model = ps.PerceptualLoss(model='net-lin', net='vgg',
+                                   use_gpu=torch.cuda.is_available(),
+                                   gpu_ids=[0] if torch.cuda.is_available() else None)
+    lpips_model.eval()
 
     with torch.no_grad():
         for i, d in enumerate(test_dataloader):
@@ -384,6 +391,10 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
                 rd_loss.update(out_criterion["rd_loss"].item())
             elif out_criterion.get("charbonnier") is not None:
                 charbonnier.update(out_criterion["charbonnier"].item())
+            
+            # Compute LPIPS for Phase 2 validation
+            lpips_val = lpips_model(out_net['x_hat'], d).mean().item()
+            lpips.update(lpips_val)
 
             rec = torch2img(out_net['x_hat'])
             img = torch2img(d)
@@ -402,6 +413,8 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     tb_logger.add_scalar('{}'.format('[val]: ms-ssim'), ms_ssim.avg, epoch + 1)
     if dists.count > 0:
         tb_logger.add_scalar('{}'.format('[val]: dists'), dists.avg, epoch + 1)
+    if lpips.count > 0:
+        tb_logger.add_scalar('{}'.format('[val]: lpips'), lpips.avg, epoch + 1)
     tb_logger.add_scalar('{}'.format('[val]: style loss'), style_loss.avg, epoch + 1)
     if rd_loss.count > 0:
         tb_logger.add_scalar('{}'.format('[val]: rd_loss'), rd_loss.avg, epoch + 1)
@@ -411,6 +424,7 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     rd_str = f"{rd_loss.avg:.4f}" if rd_loss.count > 0 else "N/A"
     charbonnier_str = f"{charbonnier.avg:.4f}" if charbonnier.count > 0 else "N/A"
     dists_str = f"{dists.avg:.4f}" if dists.count > 0 else "N/A"
+    lpips_str = f"{lpips.avg:.4f}" if lpips.count > 0 else "N/A"
     
     logger_val.info(
         f"Test epoch {epoch + 1}: Average losses: "
@@ -418,6 +432,7 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
         f"RD loss: {rd_str} | "
         f"Charbonnier loss: {charbonnier_str} | "
         f"DISTS loss: {dists_str} | "
+        f"LPIPS loss: {lpips_str} | "
         f"Style loss: {style_loss.avg:.4f} | "
         f"Adv loss: {adv_loss.avg:.4f} | "
         f"Bpp loss: {bpp_loss.avg:.4f} | "

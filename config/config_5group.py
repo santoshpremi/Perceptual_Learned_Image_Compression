@@ -18,7 +18,7 @@ def model_config():
         
         # Phase 2: Additional perceptual loss weights
         "lambda_rd": 1e-2,  # MSE (Rate-Distortion) loss weight for Phase 2
-        "lambda_dists": 0.5,  # DISTS perceptual loss weight (Phase 2)
+        "lambda_dists": 1.0,  # DISTS perceptual loss weight (Phase 2)
         "lambda_face": 0,
         "lambda_gan": 1,  # GAN adversarial loss weight for Phase 2
 
