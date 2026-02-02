@@ -8,12 +8,12 @@ pillow>=9.5
 torchmetrics>=1.3
 tqdm>=4.66
 pyyaml>=6.0
-lpips>=0.1.4
+lpips>=0.1.4  # LPIPS perceptual loss for Phase 1
 scikit-image>=0.22
 opencv-python>=4.8
 tensorboard>=2.14
 wandb>=0.16
 einops>=0.7
 boto3>=1.26.0
-piq>=0.7.0
+piq>=0.7.0  # Provides DISTS perceptual metric for Phase 2
 

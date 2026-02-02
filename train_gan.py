@@ -128,8 +128,9 @@ def main():
     optimizer_D = torch.optim.Adam(net_disc.parameters(), lr=args.lr_D)
     lr_scheduler_D = optim.lr_scheduler.MultiStepLR(optimizer_D, milestones=[80, 100], gamma=0.1)
 
-    # Phase 2 loss: Enhanced perceptual loss with PIEAPP (DISTS removed)
-    # Use Rate-Distortion (MSE/MS-SSIM) instead of Charbonnier for consistency with Phase 1
+    # Phase 2 loss: Enhanced perceptual loss with DISTS (replacing LPIPS and PIEAPP)
+    # Use Rate-Distortion (MSE/MS-SSIM) + DISTS + Style + GAN
+    # DISTS provides better perceptual quality assessment than LPIPS/PIEAPP
     # Use metrics='mse' for MSE-based or 'ms-ssim' for MS-SSIM based rate-distortion
     criterion = RateDistortionPOELICLossPhase2(lmbda=args.lmbda, device=device, gpu_id=args.gpu_id, metrics='mse')
     

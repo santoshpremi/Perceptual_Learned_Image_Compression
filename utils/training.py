@@ -154,23 +154,21 @@ def train_one_epoch_gan(
         loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
 
         out_criterion = criterion(out_net, d)
-        # Phase 2: Uses MSE (RD) + LPIPS + Style + GAN + Rate (BPP) + PIEAPP
+        # Phase 2: Uses MSE (RD) + DISTS + Style + GAN + Rate (BPP)
         if config is not None:
-            # Phase 2 uses MSE (rd_loss) + PIEAPP
+            # Phase 2 uses MSE (rd_loss) + DISTS
             loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
-                          config["lambda_lpips"] * out_criterion["lpips"] + 
+                          config.get("lambda_dists", 1.0) * out_criterion["dists"] + 
                           config["lambda_style"] * out_criterion["style_loss"] + 
                           config["lambda_gan"] * loss_G_fake + 
-                          config["lambda_rate"] * out_criterion["bpp_loss"] +
-                          config.get("lambda_pieapp", 0.3) * out_criterion.get("pieapp", 0))
+                          config["lambda_rate"] * out_criterion["bpp_loss"])
         else:
             # Default hardcoded values (for backward compatibility)
             loss_G_total = (out_criterion["rd_loss"] + 
-                          2 * out_criterion["lpips"] + 
+                          out_criterion["dists"] + 
                           out_criterion["style_loss"] + 
                           loss_G_fake + 
-                          out_criterion["bpp_loss"] +
-                          0.3 * out_criterion.get("pieapp", 0))
+                          out_criterion["bpp_loss"])
         loss_G_total.backward()
 
         if clip_max_norm > 0:
@@ -190,15 +188,15 @@ def train_one_epoch_gan(
             tb_logger.add_scalar('{}'.format('[train]: aux_loss'), aux_loss.item(), current_step)
             if out_criterion.get("rd_loss") is not None:
                 tb_logger.add_scalar('{}'.format('[train]: rd_loss'), out_criterion["rd_loss"].item(), current_step)
-            if out_criterion.get("pieapp") is not None and isinstance(out_criterion["pieapp"], torch.Tensor):
-                tb_logger.add_scalar('{}'.format('[train]: pieapp_loss'), out_criterion["pieapp"].item(), current_step)
+            if out_criterion.get("dists") is not None and isinstance(out_criterion["dists"], torch.Tensor):
+                tb_logger.add_scalar('{}'.format('[train]: dists_loss'), out_criterion["dists"].item(), current_step)
           
-        # print(out_criterion["loss"].size(),out_criterion["charbonnier"].size(),out_criterion["lpips"].size(),out_criterion["style_loss"].size())
+        # print(out_criterion["loss"].size(),out_criterion["charbonnier"].size(),out_criterion["dists"].size(),out_criterion["style_loss"].size())
         if i % 100 == 0:
-                # Phase 2 uses MSE (rd_loss)
+                # Phase 2 uses MSE (rd_loss) + DISTS
                 rd_str = f'{out_criterion["rd_loss"].item():.4f}'
-                pieapp_val = out_criterion.get("pieapp", 0)
-                pieapp_str = f'{pieapp_val.item():.4f}' if isinstance(pieapp_val, torch.Tensor) else '0.0000'
+                dists_val = out_criterion.get("dists", 0)
+                dists_str = f'{dists_val.item():.4f}' if isinstance(dists_val, torch.Tensor) else '0.0000'
                 
                 logger_train.info(
                     f"Train epoch {epoch + 1}: ["
@@ -206,9 +204,8 @@ def train_one_epoch_gan(
                     f" ({100. * i / len(train_dataloader):.0f}%)] "
                     f'Loss: {loss_G_total.item():.4f} | '
                     f'MSE (RD) loss: {rd_str} | '
-                    f'LPIPS loss: {out_criterion["lpips"].item():.4f} | '
+                    f'DISTS loss: {dists_str} | '
                     f'Style loss: {out_criterion["style_loss"].item():.4f} | '
-                    f'PIEAPP loss: {pieapp_str} | '
                     f'GAN loss: {loss_G_fake.item():.4f} | '
                     f'Bpp loss: {out_criterion["bpp_loss"].item():.2f} | '
                     f"Aux loss: {aux_loss.item():.2f}"
@@ -250,11 +247,11 @@ def train_one_epoch_gan_face(
         loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
 
         out_criterion = criterion(out_net, img, mask)
-        loss_G_total = (config["lambda_char"]* out_criterion["charbonnier"] + config["lambda_lpips"] * out_criterion["lpips"] + config["lambda_style"] * out_criterion["style_loss"] + config["lambda_gan"] * loss_G_fake + config["lambda_rate"] * out_criterion["bpp_loss"] + config["lambda_face"] * out_criterion["face_loss"])
+        loss_G_total = (config["lambda_char"]* out_criterion["charbonnier"] + config.get("lambda_dists", 1.0) * out_criterion["dists"] + config["lambda_style"] * out_criterion["style_loss"] + config["lambda_gan"] * loss_G_fake + config["lambda_rate"] * out_criterion["bpp_loss"] + config["lambda_face"] * out_criterion["face_loss"])
         
         loss_G_total.backward(torch.ones_like(loss_G_total))
         out_criterion["loss"] =  torch.mean(loss_G_total)
-        out_criterion["lpips"] = torch.mean(out_criterion["lpips"])
+        out_criterion["dists"] = torch.mean(out_criterion["dists"])
         out_criterion["face_loss"] = torch.mean(out_criterion["face_loss"])
         
         if clip_max_norm > 0:
@@ -273,8 +270,10 @@ def train_one_epoch_gan_face(
             tb_logger.add_scalar('{}'.format('[train]: lr'), optimizer.param_groups[0]['lr'], current_step)
             tb_logger.add_scalar('{}'.format('[train]: aux_loss'), aux_loss.item(), current_step)
           
-        # print(out_criterion["loss"].size(),out_criterion["charbonnier"].size(),out_criterion["lpips"].size(),out_criterion["style_loss"].size())
+        # print(out_criterion["loss"].size(),out_criterion["charbonnier"].size(),out_criterion["dists"].size(),out_criterion["style_loss"].size())
         if i % 100 == 0:
+                dists_val = out_criterion.get("dists", 0)
+                dists_str = f'{dists_val.item():.4f}' if isinstance(dists_val, torch.Tensor) else '0.0000'
                 logger_train.info(
                     f"Train epoch {epoch + 1}: ["
                     f"{i*len(d):5d}/{len(train_dataloader.dataset)}"
@@ -282,7 +281,7 @@ def train_one_epoch_gan_face(
                     f'Loss: {out_criterion["loss"].item():.4f} | '
                     f'Charbonnier loss: {out_criterion["charbonnier"].item():.4f} | '
 
-                    f'Lpips loss: {out_criterion["lpips"].item():.4f} | '
+                    f'DISTS loss: {dists_str} | '
                     f'Style loss : {out_criterion["style_loss"].item():.4f} | '
                     f'Face loss : {out_criterion["face_loss"].item():.6f} | '
                     f'Adv D loss: {loss_D_total.item():.4f} | '

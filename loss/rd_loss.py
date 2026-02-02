@@ -6,14 +6,13 @@ from loss import perceptual_loss as ps
 
 from models.vgg import Vgg16 
 
-# Add imports for PIEAPP
+# Add imports for DISTS (Phase 2 only)
 try:
-    from piq import PieAPP  # PIEAPP enabled for Phase 2
+    from piq import DISTS  # DISTS perceptual metric for Phase 2
     PIQ_AVAILABLE = True
 except ImportError:
     print("Warning: piq library not found. Install with: pip install piq")
-    PIQ_AVAILABLE = False
-# DISTS removed - using only PIEAPP for Phase 2 
+    PIQ_AVAILABLE = False 
 
 class RateDistortionLoss(nn.Module):
     """Custom rate distortion loss with a Lagrangian parameter."""
@@ -154,9 +153,9 @@ class StyleLoss(nn.Module):
         return self.loss 
 
 class RateDistortionPOELICLoss(nn.Module):
-    """Phase 1 loss: Original HFLIC loss with Charbonnier.
+    """Phase 1 loss: Original HFLIC loss with Charbonnier and LPIPS.
     
-    Uses Charbonnier loss as in original HFLIC paper for exact reproduction.
+    Uses Charbonnier loss and LPIPS perceptual metric as in original HFLIC paper.
     """
 
     def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None, metrics='mse'):
@@ -202,11 +201,10 @@ class RateDistortionPOELICLoss(nn.Module):
 
 
 class RateDistortionPOELICLossPhase2(nn.Module):
-    """Phase 2 loss: Original HFLIC Phase 2 loss with MSE and GAN.
+    """Phase 2 loss: HFLIC Phase 2 loss with MSE and GAN.
     
     Uses MSE (Rate-Distortion) loss for Phase 2.
-    Includes: MSE (RD) + LPIPS + Style + GAN + Rate (BPP) + PIEAPP
-    Note: DISTS removed - using only PIEAPP for Phase 2.
+    Includes: MSE (RD) + DISTS + Style + GAN + Rate (BPP)
     """
 
     def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None, metrics='mse'):
@@ -215,19 +213,14 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         self.mse = nn.MSELoss()
         self.gan = GANLoss()
         self.style = StyleLoss()
-        self.lpips = ps.PerceptualLoss(model='net-lin', net='vgg',
-                               use_gpu=torch.cuda.is_available(), gpu_ids=gpu_id)
         
-        # Initialize PIEAPP for Phase 2 (DISTS removed)
+        # Initialize DISTS for Phase 2
         if PIQ_AVAILABLE:
-            self.pieapp = PieAPP().to(device).eval()
-            print("PIEAPP losses initialized successfully")
+            self.dists = DISTS().to(device).eval()
+            print("DISTS loss initialized successfully")
         else:
-            self.pieapp = None
-            print("Warning: PIEAPP not available. Install piq library.")
-        
-        # DISTS removed - not used in Phase 2
-        self.dists = None
+            self.dists = None
+            print("Warning: DISTS not available. Install piq library.")
         
         print(gpu_id)
         self.lmbda = lmbda
@@ -251,19 +244,14 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         out["rd_loss"] = self.mse(output["x_hat"], target)
         out["charbonnier"] = None  # Not used in Phase 2
         
-        out["lpips"] = self.lpips(output["x_hat"], target).mean()
-        
-        # DISTS removed - not used in Phase 2
-        out["dists"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
-
-        # Compute PIEAPP loss (enabled for Phase 2)
-        if self.pieapp is not None:
-            # PIEAPP expects images in [0, 1] range - clamp to ensure valid range
+        # Compute DISTS loss
+        if self.dists is not None:
+            # DISTS expects images in [0, 1] range - clamp to ensure valid range
             x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
             target_clamped = torch.clamp(target, 0.0, 1.0)
-            out["pieapp"] = self.pieapp(x_hat_clamped, target_clamped)
+            out["dists"] = self.dists(x_hat_clamped, target_clamped)
         else:
-            out["pieapp"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
+            out["dists"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
         
         x_hat_feat = [feat for feat in x_hat_feat]
         target_feat = [feat for feat in target_feat]
@@ -275,16 +263,22 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         return out
 
 class RateDistortionPOELICFaceLoss(nn.Module):
-    """Custom rate distortion loss with a Lagrangian parameter."""
+    """Custom rate distortion loss with a Lagrangian parameter for face images."""
 
     def __init__(self, lmbda=1e-2, device = "cuda", gpu_id=None):
         super().__init__()
         self.charbonnier = CharbonnierLoss()
         self.gan = GANLoss()
         self.style = StyleLoss()
-        # self.lpips = lpips.LPIPS(net='vgg').cuda()
-        self.lpips =  ps.PerceptualLoss(model='net-lin', net='vgg',
-                               use_gpu=torch.cuda.is_available(),gpu_ids=gpu_id)
+        
+        # Initialize DISTS for perceptual loss
+        if PIQ_AVAILABLE:
+            self.dists = DISTS().to(device).eval()
+            print("DISTS loss initialized successfully")
+        else:
+            self.dists = None
+            print("Warning: DISTS not available. Install piq library.")
+        
         self.mse = nn.MSELoss()
 
         print(gpu_id)
@@ -315,7 +309,14 @@ class RateDistortionPOELICFaceLoss(nn.Module):
         # x_tidle_feat  = self.vgg(x_tidle)
         # target_feat = self.vgg(target)
         out["charbonnier"] = self.charbonnier((1-mask) * x_hat, target)
-        out["lpips"]       = self.lpips(x_tidle, target).mean()
+        
+        # Compute DISTS loss
+        if self.dists is not None:
+            x_tidle_clamped = torch.clamp(x_tidle, 0.0, 1.0)
+            target_clamped = torch.clamp(target, 0.0, 1.0)
+            out["dists"] = self.dists(x_tidle_clamped, target_clamped)
+        else:
+            out["dists"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
         
         x_tidle_feat  = [feat for feat in  x_tidle_feat]
         target_feat = [feat for feat in  target_feat]
