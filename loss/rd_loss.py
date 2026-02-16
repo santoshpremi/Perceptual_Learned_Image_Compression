@@ -201,10 +201,10 @@ class RateDistortionPOELICLoss(nn.Module):
 
 
 class RateDistortionPOELICLossPhase2(nn.Module):
-    """Phase 2 loss: HFLIC Phase 2 loss with MSE and GAN.
+    """Phase 2 loss: HFLIC Phase 2 loss with MSE, LPIPS, DISTS and GAN.
     
     Uses MSE (Rate-Distortion) loss for Phase 2.
-    Includes: MSE (RD) + DISTS + Style + GAN + Rate (BPP)
+    Includes: MSE (RD) + LPIPS + DISTS + Style + GAN + Rate (BPP)
     """
 
     def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None, metrics='mse'):
@@ -213,6 +213,8 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         self.mse = nn.MSELoss()
         self.gan = GANLoss()
         self.style = StyleLoss()
+        self.lpips = ps.PerceptualLoss(model='net-lin', net='vgg',
+                               use_gpu=torch.cuda.is_available(), gpu_ids=gpu_id)
         
         # Initialize DISTS for Phase 2
         if PIQ_AVAILABLE:
@@ -243,6 +245,9 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         # Phase 2: Use MSE (Rate-Distortion) loss
         out["rd_loss"] = self.mse(output["x_hat"], target)
         out["charbonnier"] = None  # Not used in Phase 2
+        
+        # Compute LPIPS loss
+        out["lpips"] = self.lpips(output["x_hat"], target).mean()
         
         # Compute DISTS loss
         if self.dists is not None:

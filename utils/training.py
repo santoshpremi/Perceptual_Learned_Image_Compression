@@ -154,10 +154,11 @@ def train_one_epoch_gan(
         loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
 
         out_criterion = criterion(out_net, d)
-        # Phase 2: Uses MSE (RD) + DISTS + Style + GAN + Rate (BPP)
+        # Phase 2: Uses MSE (RD) + LPIPS + DISTS + Style + GAN + Rate (BPP)
         if config is not None:
-            # Phase 2 uses MSE (rd_loss) + DISTS
+            # Phase 2 uses MSE (rd_loss) + LPIPS + DISTS
             loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
+                          config.get("lambda_lpips", 1.0) * out_criterion["lpips"] + 
                           config.get("lambda_dists", 1.0) * out_criterion["dists"] + 
                           config["lambda_style"] * out_criterion["style_loss"] + 
                           config["lambda_gan"] * loss_G_fake + 
@@ -165,6 +166,7 @@ def train_one_epoch_gan(
         else:
             # Default hardcoded values (for backward compatibility)
             loss_G_total = (out_criterion["rd_loss"] + 
+                          out_criterion["lpips"] + 
                           out_criterion["dists"] + 
                           out_criterion["style_loss"] + 
                           loss_G_fake + 
@@ -193,8 +195,10 @@ def train_one_epoch_gan(
           
         # print(out_criterion["loss"].size(),out_criterion["charbonnier"].size(),out_criterion["dists"].size(),out_criterion["style_loss"].size())
         if i % 100 == 0:
-                # Phase 2 uses MSE (rd_loss) + DISTS
+                # Phase 2 uses MSE (rd_loss) + LPIPS + DISTS
                 rd_str = f'{out_criterion["rd_loss"].item():.4f}'
+                lpips_val = out_criterion.get("lpips", 0)
+                lpips_str = f'{lpips_val.item():.4f}' if isinstance(lpips_val, torch.Tensor) else '0.0000'
                 dists_val = out_criterion.get("dists", 0)
                 dists_str = f'{dists_val.item():.4f}' if isinstance(dists_val, torch.Tensor) else '0.0000'
                 
@@ -204,6 +208,7 @@ def train_one_epoch_gan(
                     f" ({100. * i / len(train_dataloader):.0f}%)] "
                     f'Loss: {loss_G_total.item():.4f} | '
                     f'MSE (RD) loss: {rd_str} | '
+                    f'LPIPS loss: {lpips_str} | '
                     f'DISTS loss: {dists_str} | '
                     f'Style loss: {out_criterion["style_loss"].item():.4f} | '
                     f'GAN loss: {loss_G_fake.item():.4f} | '

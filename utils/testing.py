@@ -325,12 +325,6 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     aux_loss = AverageMeter()
     psnr = AverageMeter()
     ms_ssim = AverageMeter()
-    
-    # Initialize LPIPS model for Phase 2 validation
-    lpips_model = ps.PerceptualLoss(model='net-lin', net='vgg',
-                                   use_gpu=torch.cuda.is_available(),
-                                   gpu_ids=[0] if torch.cuda.is_available() else None)
-    lpips_model.eval()
 
     with torch.no_grad():
         for i, d in enumerate(test_dataloader):
@@ -363,10 +357,11 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
 
             pred_fake = model_disc(out_net["x_hat"])
             loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
-            # Phase 2: Use MSE (Rate-Distortion) loss + DISTS loss
+            # Phase 2: Use MSE (RD) + LPIPS + DISTS + Style + GAN + Rate (BPP)
             if config is not None:
-                # Phase 2 uses MSE (rd_loss) + DISTS
+                # Phase 2 uses MSE (rd_loss) + LPIPS + DISTS
                 loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
+                              config.get("lambda_lpips", 1.0) * out_criterion["lpips"] + 
                               config.get("lambda_dists", 1.0) * out_criterion["dists"] + 
                               config["lambda_style"] * out_criterion["style_loss"] + 
                               config["lambda_gan"] * loss_G_fake + 
@@ -374,6 +369,7 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
             else:
                 # Default hardcoded values (for backward compatibility)
                 loss_G_total = (out_criterion["rd_loss"] + 
+                              out_criterion["lpips"] + 
                               out_criterion["dists"] + 
                               out_criterion["style_loss"] + 
                               loss_G_fake + 
@@ -384,6 +380,8 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
             loss.update(loss_G_total.item())
             if isinstance(out_criterion["dists"], torch.Tensor):
                 dists.update(out_criterion["dists"].item())
+            if out_criterion.get("lpips") is not None and isinstance(out_criterion["lpips"], torch.Tensor):
+                lpips.update(out_criterion["lpips"].item())
             style_loss.update(out_criterion["style_loss"].item())
             adv_loss.update(loss_G_fake.item())
             # Track RD loss (MSE) for Phase 2
@@ -391,10 +389,6 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
                 rd_loss.update(out_criterion["rd_loss"].item())
             elif out_criterion.get("charbonnier") is not None:
                 charbonnier.update(out_criterion["charbonnier"].item())
-            
-            # Compute LPIPS for Phase 2 validation
-            lpips_val = lpips_model(out_net['x_hat'], d).mean().item()
-            lpips.update(lpips_val)
 
             rec = torch2img(out_net['x_hat'])
             img = torch2img(d)
