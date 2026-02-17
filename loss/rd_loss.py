@@ -14,13 +14,14 @@ except ImportError:
     print("Warning: piq library not found. Install with: pip install piq")
     PIQ_AVAILABLE = False
 
-# Add imports for GMSD (Phase 2 only - lightweight perceptual loss)
+# Add imports for GMSD (Phase 2 only - lightweight perceptual loss) via pyiqa
 try:
-    from piq import gmsd
+    import pyiqa
     GMSD_AVAILABLE = True
 except ImportError:
     GMSD_AVAILABLE = False
-    print("Warning: piq gmsd not found. Install with: pip install piq") 
+    pyiqa = None
+    print("Warning: pyiqa not found. Install with: pip install pyiqa") 
 
 class RateDistortionLoss(nn.Module):
     """Custom rate distortion loss with a Lagrangian parameter."""
@@ -226,9 +227,11 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         self.device = device
         
         if GMSD_AVAILABLE:
-            print("GMSD loss initialized successfully (lightweight, replaces AHIQ)")
+            self.gmsd_metric = pyiqa.create_metric('gmsd', device=device).eval()
+            print("GMSD loss initialized successfully (pyiqa, lightweight)")
         else:
-            print("Warning: GMSD not available. Install piq: pip install piq")
+            self.gmsd_metric = None
+            print("Warning: GMSD not available. Install pyiqa: pip install pyiqa")
         
         print(gpu_id)
         self.lmbda = lmbda
@@ -253,11 +256,15 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         out["charbonnier"] = None  # Not used in Phase 2
         out["lpips"] = None  # Not in loss; only computed for testing/eval
         
-        # Compute GMSD loss (lower=better, used directly). piq.gmsd accepts RGB (N,3,H,W).
-        if GMSD_AVAILABLE:
+        # Compute GMSD loss (lower=better) via pyiqa. Inputs: (pred, ref) RGB [0,1].
+        if self.gmsd_metric is not None:
             x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
             target_clamped = torch.clamp(target, 0.0, 1.0)
-            out["gmsd"] = gmsd(x_hat_clamped, target_clamped, data_range=1.0, reduction='mean')
+            if torch.isfinite(x_hat_clamped).all() and torch.isfinite(target_clamped).all():
+                gmsd_val = self.gmsd_metric(x_hat_clamped, target_clamped)
+                out["gmsd"] = gmsd_val.mean() if gmsd_val.numel() > 1 else gmsd_val
+            else:
+                out["gmsd"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
         else:
             out["gmsd"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
         

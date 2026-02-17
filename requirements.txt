@@ -15,5 +15,6 @@ tensorboard>=2.14
 wandb>=0.16
 einops>=0.7
 boto3>=1.26.0
-piq>=0.7.0  # Provides GMSD perceptual metric for Phase 2 (lightweight, no OOM)
+piq>=0.7.0  # Provides DISTS (Face loss)
+pyiqa>=0.1.13  # Provides GMSD perceptual metric for Phase 2 (lightweight)
 
