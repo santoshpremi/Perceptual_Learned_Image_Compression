@@ -12,7 +12,15 @@ try:
     PIQ_AVAILABLE = True
 except ImportError:
     print("Warning: piq library not found. Install with: pip install piq")
-    PIQ_AVAILABLE = False 
+    PIQ_AVAILABLE = False
+
+# Add imports for AHIQ (Phase 2 only, replaces LPIPS)
+try:
+    import pyiqa
+    AHIQ_AVAILABLE = True
+except ImportError:
+    AHIQ_AVAILABLE = False
+    print("Warning: pyiqa library not found. Install with: pip install pyiqa") 
 
 class RateDistortionLoss(nn.Module):
     """Custom rate distortion loss with a Lagrangian parameter."""
@@ -201,10 +209,12 @@ class RateDistortionPOELICLoss(nn.Module):
 
 
 class RateDistortionPOELICLossPhase2(nn.Module):
-    """Phase 2 loss: HFLIC Phase 2 loss with MSE, LPIPS, DISTS and GAN.
+    """Phase 2 loss: HFLIC Phase 2 loss with MSE, AHIQ and GAN (no LPIPS, no DISTS).
     
     Uses MSE (Rate-Distortion) loss for Phase 2.
-    Includes: MSE (RD) + LPIPS + DISTS + Style + GAN + Rate (BPP)
+    Includes: MSE (RD) + AHIQ + Style + GAN + Rate (BPP)
+    AHIQ: higher is better, so loss = 1 - AHIQ(x_hat, target)
+    LPIPS is only used for evaluation/testing, not in training.
     """
 
     def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None, metrics='mse'):
@@ -213,16 +223,14 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         self.mse = nn.MSELoss()
         self.gan = GANLoss()
         self.style = StyleLoss()
-        self.lpips = ps.PerceptualLoss(model='net-lin', net='vgg',
-                               use_gpu=torch.cuda.is_available(), gpu_ids=gpu_id)
         
-        # Initialize DISTS for Phase 2
-        if PIQ_AVAILABLE:
-            self.dists = DISTS().to(device).eval()
-            print("DISTS loss initialized successfully")
+        # Initialize AHIQ (replaces LPIPS) - full-reference, higher is better
+        if AHIQ_AVAILABLE:
+            self.ahiq = pyiqa.create_metric('ahiq', device=device).eval()
+            print("AHIQ loss initialized successfully (replaces LPIPS, DISTS removed)")
         else:
-            self.dists = None
-            print("Warning: DISTS not available. Install piq library.")
+            self.ahiq = None
+            print("Warning: AHIQ not available. Install pyiqa: pip install pyiqa")
         
         print(gpu_id)
         self.lmbda = lmbda
@@ -245,18 +253,18 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         # Phase 2: Use MSE (Rate-Distortion) loss
         out["rd_loss"] = self.mse(output["x_hat"], target)
         out["charbonnier"] = None  # Not used in Phase 2
+        out["lpips"] = None  # Not in loss; only computed for testing/eval
         
-        # Compute LPIPS loss
-        out["lpips"] = self.lpips(output["x_hat"], target).mean()
-        
-        # Compute DISTS loss
-        if self.dists is not None:
-            # DISTS expects images in [0, 1] range - clamp to ensure valid range
+        # Compute AHIQ loss (AHIQ higher=better, so loss = 1 - score for minimization)
+        if self.ahiq is not None:
             x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
             target_clamped = torch.clamp(target, 0.0, 1.0)
-            out["dists"] = self.dists(x_hat_clamped, target_clamped)
+            ahiq_score = self.ahiq(x_hat_clamped, target_clamped)
+            # AHIQ returns per-image scores; mean over batch. Higher=better, so loss=1-score
+            ahiq_score = ahiq_score.mean() if ahiq_score.numel() > 1 else ahiq_score
+            out["ahiq"] = 1.0 - ahiq_score
         else:
-            out["dists"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
+            out["ahiq"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
         
         x_hat_feat = [feat for feat in x_hat_feat]
         target_feat = [feat for feat in target_feat]

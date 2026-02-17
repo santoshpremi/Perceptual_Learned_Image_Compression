@@ -314,12 +314,18 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     device = next(model.parameters()).device
     gan_loss = GANLoss('hinge', loss_weight=2.0, real_label_val=1.0, fake_label_val=0.0)
 
+    # LPIPS for evaluation only (not in training loss)
+    lpips_model = ps.PerceptualLoss(model='net-lin', net='vgg',
+                                   use_gpu=torch.cuda.is_available(),
+                                   gpu_ids=[0])
+    lpips_model.eval()
+
     loss = AverageMeter()
     bpp_loss = AverageMeter()
     charbonnier = AverageMeter()
     rd_loss = AverageMeter()
-    dists = AverageMeter()
     lpips = AverageMeter()
+    ahiq = AverageMeter()
     style_loss = AverageMeter() 
     adv_loss = AverageMeter() 
     aux_loss = AverageMeter()
@@ -357,20 +363,16 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
 
             pred_fake = model_disc(out_net["x_hat"])
             loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
-            # Phase 2: Use MSE (RD) + LPIPS + DISTS + Style + GAN + Rate (BPP)
+            # Phase 2: MSE (RD) + AHIQ + Style + GAN + Rate (BPP) - no LPIPS in loss, no DISTS
             if config is not None:
-                # Phase 2 uses MSE (rd_loss) + LPIPS + DISTS
                 loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
-                              config.get("lambda_lpips", 1.0) * out_criterion["lpips"] + 
-                              config.get("lambda_dists", 1.0) * out_criterion["dists"] + 
+                              config.get("lambda_ahiq", 1.0) * out_criterion["ahiq"] + 
                               config["lambda_style"] * out_criterion["style_loss"] + 
                               config["lambda_gan"] * loss_G_fake + 
                               config["lambda_rate"] * out_criterion["bpp_loss"])
             else:
-                # Default hardcoded values (for backward compatibility)
                 loss_G_total = (out_criterion["rd_loss"] + 
-                              out_criterion["lpips"] + 
-                              out_criterion["dists"] + 
+                              out_criterion["ahiq"] + 
                               out_criterion["style_loss"] + 
                               loss_G_fake + 
                               out_criterion["bpp_loss"])
@@ -378,11 +380,12 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
             aux_loss.update(model.aux_loss())
             bpp_loss.update(out_criterion["bpp_loss"].item())
             loss.update(loss_G_total.item())
-            if isinstance(out_criterion["dists"], torch.Tensor):
-                dists.update(out_criterion["dists"].item())
-            if out_criterion.get("lpips") is not None and isinstance(out_criterion["lpips"], torch.Tensor):
-                lpips.update(out_criterion["lpips"].item())
+            if out_criterion.get("ahiq") is not None and isinstance(out_criterion["ahiq"], torch.Tensor):
+                ahiq.update(out_criterion["ahiq"].item())
             style_loss.update(out_criterion["style_loss"].item())
+            # LPIPS for evaluation (computed separately, not in training loss)
+            lpips_val = lpips_model(out_net["x_hat"], d).mean().item()
+            lpips.update(lpips_val)
             adv_loss.update(loss_G_fake.item())
             # Track RD loss (MSE) for Phase 2
             if out_criterion.get("rd_loss") is not None:
@@ -405,10 +408,10 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     tb_logger.add_scalar('{}'.format('[val]: bpp_loss'), bpp_loss.avg, epoch + 1)
     tb_logger.add_scalar('{}'.format('[val]: psnr'), psnr.avg, epoch + 1)
     tb_logger.add_scalar('{}'.format('[val]: ms-ssim'), ms_ssim.avg, epoch + 1)
-    if dists.count > 0:
-        tb_logger.add_scalar('{}'.format('[val]: dists'), dists.avg, epoch + 1)
     if lpips.count > 0:
         tb_logger.add_scalar('{}'.format('[val]: lpips'), lpips.avg, epoch + 1)
+    if ahiq.count > 0:
+        tb_logger.add_scalar('{}'.format('[val]: ahiq'), ahiq.avg, epoch + 1)
     tb_logger.add_scalar('{}'.format('[val]: style loss'), style_loss.avg, epoch + 1)
     if rd_loss.count > 0:
         tb_logger.add_scalar('{}'.format('[val]: rd_loss'), rd_loss.avg, epoch + 1)
@@ -417,16 +420,16 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     
     rd_str = f"{rd_loss.avg:.4f}" if rd_loss.count > 0 else "N/A"
     charbonnier_str = f"{charbonnier.avg:.4f}" if charbonnier.count > 0 else "N/A"
-    dists_str = f"{dists.avg:.4f}" if dists.count > 0 else "N/A"
     lpips_str = f"{lpips.avg:.4f}" if lpips.count > 0 else "N/A"
+    ahiq_str = f"{ahiq.avg:.4f}" if ahiq.count > 0 else "N/A"
     
     logger_val.info(
         f"Test epoch {epoch + 1}: Average losses: "
         f"Loss: {loss.avg:.4f} | "
         f"RD loss: {rd_str} | "
         f"Charbonnier loss: {charbonnier_str} | "
-        f"DISTS loss: {dists_str} | "
         f"LPIPS loss: {lpips_str} | "
+        f"AHIQ loss: {ahiq_str} | "
         f"Style loss: {style_loss.avg:.4f} | "
         f"Adv loss: {adv_loss.avg:.4f} | "
         f"Bpp loss: {bpp_loss.avg:.4f} | "
