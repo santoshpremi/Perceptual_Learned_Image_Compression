@@ -16,9 +16,9 @@ def model_config():
         "lambda_style": 1e2,
         "lambda_rate": 0.30,
         
-        # Phase 2: Perceptual loss weights (no LPIPS, no DISTS, use AHIQ only)
+        # Phase 2: Perceptual loss weights (no LPIPS, no DISTS, use GMSD only)
         "lambda_rd": 0.01,  # MSE (Rate-Distortion) loss weight for Phase 2
-        "lambda_ahiq": 1.0,  # AHIQ perceptual loss weight (Phase 2)
+        "lambda_gmsd": 1.0,  # GMSD perceptual loss weight (Phase 2, lightweight)
         "lambda_face": 0,
         "lambda_gan": 1,  # GAN adversarial loss weight for Phase 2
 

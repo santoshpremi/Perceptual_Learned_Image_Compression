@@ -14,13 +14,13 @@ except ImportError:
     print("Warning: piq library not found. Install with: pip install piq")
     PIQ_AVAILABLE = False
 
-# Add imports for AHIQ (Phase 2 only, replaces LPIPS)
+# Add imports for GMSD (Phase 2 only - lightweight perceptual loss)
 try:
-    import pyiqa
-    AHIQ_AVAILABLE = True
+    from piq import gmsd
+    GMSD_AVAILABLE = True
 except ImportError:
-    AHIQ_AVAILABLE = False
-    print("Warning: pyiqa library not found. Install with: pip install pyiqa") 
+    GMSD_AVAILABLE = False
+    print("Warning: piq gmsd not found. Install with: pip install piq") 
 
 class RateDistortionLoss(nn.Module):
     """Custom rate distortion loss with a Lagrangian parameter."""
@@ -209,11 +209,11 @@ class RateDistortionPOELICLoss(nn.Module):
 
 
 class RateDistortionPOELICLossPhase2(nn.Module):
-    """Phase 2 loss: HFLIC Phase 2 loss with MSE, AHIQ and GAN (no LPIPS, no DISTS).
+    """Phase 2 loss: HFLIC Phase 2 loss with MSE, GMSD and GAN (no LPIPS, no DISTS).
     
     Uses MSE (Rate-Distortion) loss for Phase 2.
-    Includes: MSE (RD) + AHIQ + Style + GAN + Rate (BPP)
-    AHIQ: higher is better, so loss = 1 - AHIQ(x_hat, target)
+    Includes: MSE (RD) + GMSD + Style + GAN + Rate (BPP)
+    GMSD: lower is better, used directly as loss. Lightweight gradient-based metric.
     LPIPS is only used for evaluation/testing, not in training.
     """
 
@@ -223,14 +223,12 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         self.mse = nn.MSELoss()
         self.gan = GANLoss()
         self.style = StyleLoss()
+        self.device = device
         
-        # Initialize AHIQ (replaces LPIPS) - full-reference, higher is better
-        if AHIQ_AVAILABLE:
-            self.ahiq = pyiqa.create_metric('ahiq', device=device).eval()
-            print("AHIQ loss initialized successfully (replaces LPIPS, DISTS removed)")
+        if GMSD_AVAILABLE:
+            print("GMSD loss initialized successfully (lightweight, replaces AHIQ)")
         else:
-            self.ahiq = None
-            print("Warning: AHIQ not available. Install pyiqa: pip install pyiqa")
+            print("Warning: GMSD not available. Install piq: pip install piq")
         
         print(gpu_id)
         self.lmbda = lmbda
@@ -255,16 +253,13 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         out["charbonnier"] = None  # Not used in Phase 2
         out["lpips"] = None  # Not in loss; only computed for testing/eval
         
-        # Compute AHIQ loss (AHIQ higher=better, so loss = 1 - score for minimization)
-        if self.ahiq is not None:
+        # Compute GMSD loss (lower=better, used directly). piq.gmsd accepts RGB (N,3,H,W).
+        if GMSD_AVAILABLE:
             x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
             target_clamped = torch.clamp(target, 0.0, 1.0)
-            ahiq_score = self.ahiq(x_hat_clamped, target_clamped)
-            # AHIQ returns per-image scores; mean over batch. Higher=better, so loss=1-score
-            ahiq_score = ahiq_score.mean() if ahiq_score.numel() > 1 else ahiq_score
-            out["ahiq"] = 1.0 - ahiq_score
+            out["gmsd"] = gmsd(x_hat_clamped, target_clamped, data_range=1.0, reduction='mean')
         else:
-            out["ahiq"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
+            out["gmsd"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
         
         x_hat_feat = [feat for feat in x_hat_feat]
         target_feat = [feat for feat in target_feat]

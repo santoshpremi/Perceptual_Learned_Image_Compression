@@ -154,16 +154,16 @@ def train_one_epoch_gan(
         loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
 
         out_criterion = criterion(out_net, d)
-        # Phase 2: MSE (RD) + AHIQ + Style + GAN + Rate (BPP) - no LPIPS, no DISTS
+        # Phase 2: MSE (RD) + GMSD + Style + GAN + Rate (BPP) - no LPIPS, no DISTS
         if config is not None:
             loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
-                          config.get("lambda_ahiq", 1.0) * out_criterion["ahiq"] + 
+                          config.get("lambda_gmsd", 1.0) * out_criterion["gmsd"] + 
                           config["lambda_style"] * out_criterion["style_loss"] + 
                           config["lambda_gan"] * loss_G_fake + 
                           config["lambda_rate"] * out_criterion["bpp_loss"])
         else:
             loss_G_total = (out_criterion["rd_loss"] + 
-                          out_criterion["ahiq"] + 
+                          out_criterion["gmsd"] + 
                           out_criterion["style_loss"] + 
                           loss_G_fake + 
                           out_criterion["bpp_loss"])
@@ -186,15 +186,15 @@ def train_one_epoch_gan(
             tb_logger.add_scalar('{}'.format('[train]: aux_loss'), aux_loss.item(), current_step)
             if out_criterion.get("rd_loss") is not None:
                 tb_logger.add_scalar('{}'.format('[train]: rd_loss'), out_criterion["rd_loss"].item(), current_step)
-            if out_criterion.get("ahiq") is not None and isinstance(out_criterion["ahiq"], torch.Tensor):
-                tb_logger.add_scalar('{}'.format('[train]: ahiq_loss'), out_criterion["ahiq"].item(), current_step)
+            if out_criterion.get("gmsd") is not None and isinstance(out_criterion["gmsd"], torch.Tensor):
+                tb_logger.add_scalar('{}'.format('[train]: gmsd_loss'), out_criterion["gmsd"].item(), current_step)
           
         # print(out_criterion["loss"].size(),out_criterion["charbonnier"].size(),out_criterion["dists"].size(),out_criterion["style_loss"].size())
         if i % 100 == 0:
-                # Phase 2 uses MSE (rd_loss) + AHIQ (no LPIPS, no DISTS)
+                # Phase 2 uses MSE (rd_loss) + GMSD (no LPIPS, no DISTS)
                 rd_str = f'{out_criterion["rd_loss"].item():.4f}'
-                ahiq_val = out_criterion.get("ahiq", 0)
-                ahiq_str = f'{ahiq_val.item():.4f}' if isinstance(ahiq_val, torch.Tensor) else '0.0000'
+                gmsd_val = out_criterion.get("gmsd", 0)
+                gmsd_str = f'{gmsd_val.item():.4f}' if isinstance(gmsd_val, torch.Tensor) else '0.0000'
                 
                 logger_train.info(
                     f"Train epoch {epoch + 1}: ["
@@ -202,7 +202,7 @@ def train_one_epoch_gan(
                     f" ({100. * i / len(train_dataloader):.0f}%)] "
                     f'Loss: {loss_G_total.item():.4f} | '
                     f'MSE (RD) loss: {rd_str} | '
-                    f'AHIQ loss: {ahiq_str} | '
+                    f'GMSD loss: {gmsd_str} | '
                     f'Style loss: {out_criterion["style_loss"].item():.4f} | '
                     f'GAN loss: {loss_G_fake.item():.4f} | '
                     f'Bpp loss: {out_criterion["bpp_loss"].item():.2f} | '
