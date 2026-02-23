@@ -363,15 +363,17 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
 
             pred_fake = model_disc(out_net["x_hat"])
             loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
-            # Phase 2: MSE (RD) + GMSD + Style + GAN + bpp rate - no LPIPS in loss, no DISTS
+            # Phase 2: MSE (RD) + LPIPS + GMSD + Style + GAN + bpp rate (same as training for "best" checkpoint)
             if config is not None:
                 loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
+                              config.get("lambda_lpips", 1.0) * out_criterion["lpips"] +
                               config.get("lambda_gmsd", 1.0) * out_criterion["gmsd"] + 
                               config["lambda_style"] * out_criterion["style_loss"] + 
                               config["lambda_gan"] * loss_G_fake + 
                               config["lambda_bpp_rate"] * out_criterion["bpp_loss"])
             else:
                 loss_G_total = (out_criterion["rd_loss"] + 
+                              out_criterion["lpips"] +
                               out_criterion["gmsd"] + 
                               out_criterion["style_loss"] + 
                               loss_G_fake + 
@@ -383,9 +385,12 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
             if out_criterion.get("gmsd") is not None and isinstance(out_criterion["gmsd"], torch.Tensor):
                 gmsd.update(out_criterion["gmsd"].item())
             style_loss.update(out_criterion["style_loss"].item())
-            # LPIPS for evaluation (computed separately, not in training loss)
-            lpips_val = lpips_model(out_net["x_hat"], d).mean().item()
-            lpips.update(lpips_val)
+            # LPIPS: use criterion output when available (Phase 2), else compute for logging
+            if out_criterion.get("lpips") is not None and isinstance(out_criterion["lpips"], torch.Tensor):
+                lpips.update(out_criterion["lpips"].item())
+            else:
+                lpips_val = lpips_model(out_net["x_hat"], d).mean().item()
+                lpips.update(lpips_val)
             adv_loss.update(loss_G_fake.item())
             # Track RD loss (MSE) for Phase 2
             if out_criterion.get("rd_loss") is not None:
