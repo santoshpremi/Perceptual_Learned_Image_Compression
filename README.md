@@ -120,7 +120,7 @@ bash scripts/train_stage1.sh /absolute/path/to/data \
   --eval-split kodak  # or use --eval-split clic2022 for CLIC2022 validation set
 ```
 
-**Loss components**: Charbonnier (λ=2e-6) + LPIPS (λ=1) + Style (λ=1e2) + Rate/BPP (λ=0.3)  
+**Loss components**: Charbonnier (λ=2e-6) + LPIPS (λ=1) + Style (λ=1e2) + bpp rate (λ=0.3)  
 **Output checkpoint**: `./experiments/hflic_stage1/checkpoints/checkpoint_best_loss.pth.tar`
 
 #### 3. Stage 2: Finetuning with GAN (After Stage 1 completes)
@@ -144,7 +144,7 @@ bash scripts/train_hflic.sh /absolute/path/to/data \
   --gpu_id 0
 ```
 
-**Loss components**: Charbonnier (λ=2e-6) + LPIPS (λ=1) + Style (λ=1e2) + GAN (λ=1) + Rate/BPP (λ=0.3)  
+**Loss components**: Charbonnier (λ=2e-6) + LPIPS (λ=1) + Style (λ=1e2) + GAN (λ=1) + bpp rate (λ=0.3)  
 **Output checkpoint**: `./experiments/hflic_stage2/checkpoints/checkpoint_best_loss.pth.tar`
 
 #### 4. Evaluation
@@ -223,13 +223,13 @@ Modify `config/config_5group.py` or the CLI options in `utils/args.py` to adjust
 
 ```
 Stage 1 (Pre-training): train.py
-├── Loss: Charbonnier + LPIPS + Style + Rate (BPP)
+├── Loss: Charbonnier + LPIPS + Style + bpp rate
 ├── No discriminator
 └── Output: checkpoint_best_loss.pth.tar
 
 Stage 2 (GAN finetuning): train_gan.py  
 ├── Load: checkpoint from Stage 1
-├── Loss: Charbonnier + LPIPS + Style + GAN + Rate (BPP)
+├── Loss: Charbonnier + LPIPS + Style + GAN + bpp rate
 ├── With discriminator
 └── Output: Final model with improved perceptual quality
 ```

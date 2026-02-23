@@ -47,7 +47,7 @@ def main():
     - Charbonnier loss (L1-like)
     - LPIPS (perceptual loss)
     - Style loss
-    - Rate (BPP) loss
+    - bpp rate loss
     
     After training, use train_gan.py to finetune with GAN loss (Stage 2).
     """
@@ -152,7 +152,7 @@ def main():
 
     logger_train.info("=" * 80)
     logger_train.info("PHASE 1 TRAINING: Original HFLIC with Charbonnier loss")
-    logger_train.info("Loss components: Charbonnier + LPIPS + Style + Rate (BPP)")
+    logger_train.info("Loss components: Charbonnier + LPIPS + Style + bpp rate")
     logger_train.info("=" * 80)
     logger_train.info(f"Seed: {seed}")
     logger_train.info(args)

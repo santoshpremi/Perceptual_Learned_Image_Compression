@@ -20,8 +20,8 @@ def train_one_epoch(
         out_net = model(d)
 
         out_criterion = criterion(out_net, d)
-        # Phase 1: Original HFLIC - Charbonnier + LPIPS + Style + Rate (BPP)
-        # Total loss = lambda_char * Charbonnier + lambda_lpips * LPIPS + lambda_style * Style + lambda_rate * Rate (BPP)
+        # Phase 1: Original HFLIC - Charbonnier + LPIPS + Style + bpp rate
+        # Total loss = lambda_char * Charbonnier + lambda_lpips * LPIPS + lambda_style * Style + lambda_bpp_rate * bpp rate
         if config is not None:
             # Check if using Charbonnier (original HFLIC) or RD loss (for backward compatibility)
             if "charbonnier" in out_criterion and out_criterion.get("charbonnier") is not None:
@@ -29,13 +29,13 @@ def train_one_epoch(
                 total_loss = (config.get("lambda_char", 2e-6) * out_criterion["charbonnier"] + 
                          config["lambda_lpips"] * out_criterion["lpips"] + 
                          config["lambda_style"] * out_criterion["style_loss"] + 
-                         config["lambda_rate"] * out_criterion["bpp_loss"])
+                         config["lambda_bpp_rate"] * out_criterion["bpp_loss"])
             elif "rd_loss" in out_criterion and out_criterion["rd_loss"] is not None:
                 # Fallback to RD loss if Charbonnier not available (backward compatibility)
                 total_loss = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
                              config["lambda_lpips"] * out_criterion["lpips"] + 
                              config["lambda_style"] * out_criterion["style_loss"] + 
-                             config["lambda_rate"] * out_criterion["bpp_loss"])
+                             config["lambda_bpp_rate"] * out_criterion["bpp_loss"])
         else:
             # Fallback to unweighted sum if config not provided
             if "charbonnier" in out_criterion and out_criterion.get("charbonnier") is not None:
@@ -82,7 +82,7 @@ def train_one_epoch(
                     f'RD loss: {out_criterion["rd_loss"].item():.4f} | '
                     f'LPIPS loss: {out_criterion["lpips"].item():.4f} | '
                     f'Style loss: {out_criterion["style_loss"].item():.4f} | '
-                    f'Bpp loss: {out_criterion["bpp_loss"].item():.2f} | '
+                    f'Bpp rate loss: {out_criterion["bpp_loss"].item():.2f} | '
                     f"Aux loss: {aux_loss.item():.2f}"
                 )
             elif "charbonnier" in out_criterion and out_criterion.get("charbonnier") is not None:
@@ -94,7 +94,7 @@ def train_one_epoch(
                     f'Charbonnier loss: {out_criterion["charbonnier"].item():.4f} | '
                     f'LPIPS loss: {out_criterion["lpips"].item():.4f} | '
                     f'Style loss: {out_criterion["style_loss"].item():.4f} | '
-                    f'Bpp loss: {out_criterion["bpp_loss"].item():.2f} | '
+                    f'Bpp rate loss: {out_criterion["bpp_loss"].item():.2f} | '
                     f"Aux loss: {aux_loss.item():.2f}"
                 )
             elif out_criterion.get("ms_ssim_loss") is None:
@@ -106,7 +106,7 @@ def train_one_epoch(
                     f" ({100. * i / len(train_dataloader):.0f}%)] "
                     f'Loss: {out_criterion["loss"].item():.4f} | '
                     f'MSE loss: {mse_str} | '
-                    f'Bpp loss: {out_criterion["bpp_loss"].item():.2f} | '
+                    f'Bpp rate loss: {out_criterion["bpp_loss"].item():.2f} | '
                     f"Aux loss: {aux_loss.item():.2f}"
                 )
             else:
@@ -116,7 +116,7 @@ def train_one_epoch(
                     f" ({100. * i / len(train_dataloader):.0f}%)] "
                     f'Loss: {out_criterion["loss"].item():.4f} | '
                     f'MS-SSIM loss: {out_criterion["ms_ssim_loss"].item():.4f} | '
-                    f'Bpp loss: {out_criterion["bpp_loss"].item():.2f} | '
+                    f'Bpp rate loss: {out_criterion["bpp_loss"].item():.2f} | '
                     f"Aux loss: {aux_loss.item():.2f}"
                 )
 
@@ -154,13 +154,13 @@ def train_one_epoch_gan(
         loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
 
         out_criterion = criterion(out_net, d)
-        # Phase 2: MSE (RD) + GMSD + Style + GAN + Rate (BPP) - no LPIPS, no DISTS
+        # Phase 2: MSE (RD) + GMSD + Style + GAN + bpp rate - no LPIPS, no DISTS
         if config is not None:
             loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
                           config.get("lambda_gmsd", 1.0) * out_criterion["gmsd"] + 
                           config["lambda_style"] * out_criterion["style_loss"] + 
                           config["lambda_gan"] * loss_G_fake + 
-                          config["lambda_rate"] * out_criterion["bpp_loss"])
+                          config["lambda_bpp_rate"] * out_criterion["bpp_loss"])
         else:
             loss_G_total = (out_criterion["rd_loss"] + 
                           out_criterion["gmsd"] + 
@@ -205,7 +205,7 @@ def train_one_epoch_gan(
                     f'GMSD loss: {gmsd_str} | '
                     f'Style loss: {out_criterion["style_loss"].item():.4f} | '
                     f'GAN loss: {loss_G_fake.item():.4f} | '
-                    f'Bpp loss: {out_criterion["bpp_loss"].item():.2f} | '
+                    f'Bpp rate loss: {out_criterion["bpp_loss"].item():.2f} | '
                     f"Aux loss: {aux_loss.item():.2f}"
                 )
             
@@ -245,7 +245,7 @@ def train_one_epoch_gan_face(
         loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
 
         out_criterion = criterion(out_net, img, mask)
-        loss_G_total = (config["lambda_char"]* out_criterion["charbonnier"] + config.get("lambda_dists", 1.0) * out_criterion["dists"] + config["lambda_style"] * out_criterion["style_loss"] + config["lambda_gan"] * loss_G_fake + config["lambda_rate"] * out_criterion["bpp_loss"] + config["lambda_face"] * out_criterion["face_loss"])
+        loss_G_total = (config["lambda_char"]* out_criterion["charbonnier"] + config.get("lambda_dists", 1.0) * out_criterion["dists"] + config["lambda_style"] * out_criterion["style_loss"] + config["lambda_gan"] * loss_G_fake + config["lambda_bpp_rate"] * out_criterion["bpp_loss"] + config["lambda_face"] * out_criterion["face_loss"])
         
         loss_G_total.backward(torch.ones_like(loss_G_total))
         out_criterion["loss"] =  torch.mean(loss_G_total)
@@ -285,7 +285,7 @@ def train_one_epoch_gan_face(
                     f'Adv D loss: {loss_D_total.item():.4f} | '
                     f'Adv G loss: {loss_G_fake.item():.4f} | '
 
-                    f'Bpp loss: {out_criterion["bpp_loss"].item():.2f} | '
+                    f'Bpp rate loss: {out_criterion["bpp_loss"].item():.2f} | '
                     f"Aux loss: {aux_loss.item():.2f}"
                 )
             

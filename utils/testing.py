@@ -66,7 +66,7 @@ def test_one_epoch(epoch, test_dataloader, model, criterion, save_dir, logger_va
                         out_criterion["loss"] = (config.get("lambda_char", 2e-6) * out_criterion["charbonnier"] + 
                                                config["lambda_lpips"] * out_criterion["lpips"] + 
                                                config["lambda_style"] * out_criterion["style_loss"] + 
-                                               config["lambda_rate"] * out_criterion["bpp_loss"])
+                                               config["lambda_bpp_rate"] * out_criterion["bpp_loss"])
                     else:
                         # Fallback to unweighted sum if config not provided
                         out_criterion["loss"] = (out_criterion["charbonnier"] + 
@@ -80,7 +80,7 @@ def test_one_epoch(epoch, test_dataloader, model, criterion, save_dir, logger_va
                         out_criterion["loss"] = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
                                                config["lambda_lpips"] * out_criterion["lpips"] + 
                                                config["lambda_style"] * out_criterion["style_loss"] + 
-                                               config["lambda_rate"] * out_criterion["bpp_loss"])
+                                               config["lambda_bpp_rate"] * out_criterion["bpp_loss"])
                     else:
                         # Fallback to unweighted sum if config not provided
                         out_criterion["loss"] = (out_criterion["rd_loss"] + 
@@ -135,7 +135,7 @@ def test_one_epoch(epoch, test_dataloader, model, criterion, save_dir, logger_va
                 f"Charbonnier loss: {charbonnier.avg:.4f} | "
                 f"LPIPS loss: {lpips.avg:.4f} | "
                 f"Style loss: {style_loss.avg:.4f} | "
-                f"Bpp loss: {bpp_loss.avg:.4f} | "
+                f"Bpp rate loss: {bpp_loss.avg:.4f} | "
                 f"Aux loss: {aux_loss.avg:.2f} | "
                 f"PSNR: {psnr.avg:.6f} dB | "
                 f"MS-SSIM: {ms_ssim.avg:.6f} dB"
@@ -147,7 +147,7 @@ def test_one_epoch(epoch, test_dataloader, model, criterion, save_dir, logger_va
                 f"Loss: {loss.avg:.4f} | "
                 f"LPIPS loss: {lpips.avg:.4f} | "
                 f"Style loss: {style_loss.avg:.4f} | "
-                f"Bpp loss: {bpp_loss.avg:.4f} | "
+                f"Bpp rate loss: {bpp_loss.avg:.4f} | "
                 f"Aux loss: {aux_loss.avg:.2f} | "
                 f"PSNR: {psnr.avg:.6f} dB | "
                 f"MS-SSIM: {ms_ssim.avg:.6f} dB"
@@ -157,7 +157,7 @@ def test_one_epoch(epoch, test_dataloader, model, criterion, save_dir, logger_va
             f"Test epoch {epoch + 1}: Average losses: "
             f"Loss: {loss.avg:.4f} | "
             f"MSE loss: {mse_loss.avg:.4f} | "
-            f"Bpp loss: {bpp_loss.avg:.4f} | "
+            f"Bpp rate loss: {bpp_loss.avg:.4f} | "
             f"Aux loss: {aux_loss.avg:.2f} | "
             f"PSNR: {psnr.avg:.6f} dB | "
             f"MS-SSIM: {ms_ssim.avg:.6f} dB"
@@ -168,7 +168,7 @@ def test_one_epoch(epoch, test_dataloader, model, criterion, save_dir, logger_va
             f"Test epoch {epoch + 1}: Average losses: "
             f"Loss: {loss.avg:.4f} | "
             f"MS-SSIM loss: {ms_ssim_loss.avg:.4f} | "
-            f"Bpp loss: {bpp_loss.avg:.4f} | "
+            f"Bpp rate loss: {bpp_loss.avg:.4f} | "
             f"Aux loss: {aux_loss.avg:.2f} | "
             f"PSNR: {psnr.avg:.6f} dB | "
             f"MS-SSIM: {ms_ssim.avg:.6f} dB"
@@ -283,7 +283,7 @@ def test_model(test_dataloader, net, logger_test, save_dir, epoch, gpu_id):
             avg_decoder_time.update(decoder_time)
             logger_test.info(
                 f"Image[{i}] | "
-                f"Bpp loss: {bpp:.4f} | "
+                f"Bpp rate loss: {bpp:.4f} | "
                 f"PSNR: {p:.4f} dB | "
                 f"MS-SSIM: {m:.4f} dB | "
                 f"LPIPS: {lpips_val:.6f} "
@@ -363,13 +363,13 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
 
             pred_fake = model_disc(out_net["x_hat"])
             loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
-            # Phase 2: MSE (RD) + GMSD + Style + GAN + Rate (BPP) - no LPIPS in loss, no DISTS
+            # Phase 2: MSE (RD) + GMSD + Style + GAN + bpp rate - no LPIPS in loss, no DISTS
             if config is not None:
                 loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
                               config.get("lambda_gmsd", 1.0) * out_criterion["gmsd"] + 
                               config["lambda_style"] * out_criterion["style_loss"] + 
                               config["lambda_gan"] * loss_G_fake + 
-                              config["lambda_rate"] * out_criterion["bpp_loss"])
+                              config["lambda_bpp_rate"] * out_criterion["bpp_loss"])
             else:
                 loss_G_total = (out_criterion["rd_loss"] + 
                               out_criterion["gmsd"] + 
@@ -432,7 +432,7 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
         f"GMSD loss: {gmsd_str} | "
         f"Style loss: {style_loss.avg:.4f} | "
         f"Adv loss: {adv_loss.avg:.4f} | "
-        f"Bpp loss: {bpp_loss.avg:.4f} | "
+        f"Bpp rate loss: {bpp_loss.avg:.4f} | "
         f"Aux loss: {aux_loss.avg:.2f} | "
         f"PSNR: {psnr.avg:.6f} dB | "
         f"MS-SSIM: {ms_ssim.avg:.6f} dB"
@@ -536,7 +536,7 @@ def test_one_epoch_gan_face(epoch, test_dataloader, model, model_disc,criterion,
         f"Style loss: {style_loss.avg:.4f} | "
         f"Adv loss: {adv_loss.avg:.4f} | "
         f"Face loss: {face_loss.avg:.6f} | "
-        f"Bpp loss: {bpp_loss.avg:.4f} | "
+        f"Bpp rate loss: {bpp_loss.avg:.4f} | "
         f"Aux loss: {aux_loss.avg:.2f} | "
         f"PSNR: {psnr.avg:.4f} dB | "
         f"MS-SSIM: {ms_ssim.avg:.6f} dB"

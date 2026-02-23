@@ -205,7 +205,7 @@ This stage trains the compression model using perceptual losses (Charbonnier + L
 **During Training (Each Epoch):**
 1. **Training Phase**: Model learns from Open Images train split (`--train-split train`)
    - Forward pass: Compress and decompress images
-   - Compute loss: Charbonnier + LPIPS + Style + Rate (BPP)
+   - Compute loss: Charbonnier + LPIPS + Style + bpp rate
    - Backward pass: Update model weights
    - Purpose: Learn compression from training data
 
@@ -381,7 +381,7 @@ bash scripts/train_hflic.sh ${DATA_DIR} \
 - **Adds discriminator network**: GAN discriminator for adversarial training
 - **Training**: Uses Open Images train split
   - Generator (compression model) + Discriminator training
-  - Loss: Charbonnier + LPIPS + Style + **GAN** + Rate (BPP)
+  - Loss: Charbonnier + LPIPS + Style + **GAN** + bpp rate
 - **Validation**: Uses selected validation dataset (`--eval-split`)
   - Runs after each epoch
   - Computes validation metrics

@@ -213,7 +213,7 @@ class RateDistortionPOELICLossPhase2(nn.Module):
     """Phase 2 loss: HFLIC Phase 2 loss with MSE, GMSD and GAN (no LPIPS, no DISTS).
     
     Uses MSE (Rate-Distortion) loss for Phase 2.
-    Includes: MSE (RD) + GMSD + Style + GAN + Rate (BPP)
+    Includes: MSE (RD) + GMSD + Style + GAN + bpp rate
     GMSD: lower is better, used directly as loss. Lightweight gradient-based metric.
     LPIPS is only used for evaluation/testing, not in training.
     """
