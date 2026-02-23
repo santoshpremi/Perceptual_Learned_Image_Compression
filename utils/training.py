@@ -154,15 +154,17 @@ def train_one_epoch_gan(
         loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
 
         out_criterion = criterion(out_net, d)
-        # Phase 2: MSE (RD) + GMSD + Style + GAN + bpp rate - no LPIPS, no DISTS
+        # Phase 2: MSE (RD) + LPIPS + GMSD + Style + GAN + bpp rate
         if config is not None:
             loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
+                          config.get("lambda_lpips", 1.0) * out_criterion["lpips"] +
                           config.get("lambda_gmsd", 1.0) * out_criterion["gmsd"] + 
                           config["lambda_style"] * out_criterion["style_loss"] + 
                           config["lambda_gan"] * loss_G_fake + 
                           config["lambda_bpp_rate"] * out_criterion["bpp_loss"])
         else:
             loss_G_total = (out_criterion["rd_loss"] + 
+                          out_criterion["lpips"] +
                           out_criterion["gmsd"] + 
                           out_criterion["style_loss"] + 
                           loss_G_fake + 
@@ -188,13 +190,17 @@ def train_one_epoch_gan(
                 tb_logger.add_scalar('{}'.format('[train]: rd_loss'), out_criterion["rd_loss"].item(), current_step)
             if out_criterion.get("gmsd") is not None and isinstance(out_criterion["gmsd"], torch.Tensor):
                 tb_logger.add_scalar('{}'.format('[train]: gmsd_loss'), out_criterion["gmsd"].item(), current_step)
+            if out_criterion.get("lpips") is not None and isinstance(out_criterion["lpips"], torch.Tensor):
+                tb_logger.add_scalar('{}'.format('[train]: lpips_loss'), out_criterion["lpips"].item(), current_step)
           
         # print(out_criterion["loss"].size(),out_criterion["charbonnier"].size(),out_criterion["dists"].size(),out_criterion["style_loss"].size())
         if i % 100 == 0:
-                # Phase 2 uses MSE (rd_loss) + GMSD (no LPIPS, no DISTS)
+                # Phase 2 uses MSE (rd_loss) + LPIPS + GMSD
                 rd_str = f'{out_criterion["rd_loss"].item():.4f}'
                 gmsd_val = out_criterion.get("gmsd", 0)
                 gmsd_str = f'{gmsd_val.item():.4f}' if isinstance(gmsd_val, torch.Tensor) else '0.0000'
+                lpips_val = out_criterion.get("lpips", 0)
+                lpips_str = f'{lpips_val.item():.4f}' if isinstance(lpips_val, torch.Tensor) else 'N/A'
                 
                 logger_train.info(
                     f"Train epoch {epoch + 1}: ["
@@ -202,6 +208,7 @@ def train_one_epoch_gan(
                     f" ({100. * i / len(train_dataloader):.0f}%)] "
                     f'Loss: {loss_G_total.item():.4f} | '
                     f'MSE (RD) loss: {rd_str} | '
+                    f'LPIPS loss: {lpips_str} | '
                     f'GMSD loss: {gmsd_str} | '
                     f'Style loss: {out_criterion["style_loss"].item():.4f} | '
                     f'GAN loss: {loss_G_fake.item():.4f} | '

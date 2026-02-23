@@ -12,13 +12,13 @@ def model_config():
         
         # Phase 1: Original HFLIC loss weights
         "lambda_char": 2e-6,  # Charbonnier loss weight (Phase 1)
-        "lambda_lpips": 1.2,  # LPIPS perceptual loss weight (Phase 1 only)
+        "lambda_lpips": 1,  # LPIPS perceptual loss (Phase 1 and Phase 2)
         "lambda_style": 1e2,
-        "lambda_bpp_rate": 0.05,  # bpp rate loss weight
+        "lambda_bpp_rate": 0.30,  # bpp rate loss weight
         
-        # Phase 2: Perceptual loss weights (no LPIPS, no DISTS, use GMSD only)
-        "lambda_rd": 0.05,  # MSE (Rate-Distortion) loss weight for Phase 2
-        "lambda_gmsd": 2.0,  # GMSD perceptual loss weight (Phase 2, lightweight)
+        # Phase 2: Perceptual loss weights (MSE + LPIPS + GMSD + Style + GAN)
+        "lambda_rd": 0.01,  # MSE (Rate-Distortion) loss weight for Phase 2
+        "lambda_gmsd": 1.0,  # GMSD perceptual loss weight (Phase 2, lightweight)
         "lambda_face": 0,
         "lambda_gan": 1,  # GAN adversarial loss weight for Phase 2
 

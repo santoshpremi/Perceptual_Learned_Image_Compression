@@ -210,12 +210,12 @@ class RateDistortionPOELICLoss(nn.Module):
 
 
 class RateDistortionPOELICLossPhase2(nn.Module):
-    """Phase 2 loss: HFLIC Phase 2 loss with MSE, GMSD and GAN (no LPIPS, no DISTS).
+    """Phase 2 loss: HFLIC Phase 2 loss with MSE, LPIPS, GMSD and GAN.
     
     Uses MSE (Rate-Distortion) loss for Phase 2.
-    Includes: MSE (RD) + GMSD + Style + GAN + bpp rate
+    Includes: MSE (RD) + LPIPS + GMSD + Style + GAN + bpp rate
     GMSD: lower is better, used directly as loss. Lightweight gradient-based metric.
-    LPIPS is only used for evaluation/testing, not in training.
+    LPIPS: perceptual loss (same as Phase 1) for improved perceptual quality.
     """
 
     def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None, metrics='mse'):
@@ -225,6 +225,8 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         self.gan = GANLoss()
         self.style = StyleLoss()
         self.device = device
+        self.lpips = ps.PerceptualLoss(model='net-lin', net='vgg',
+                                       use_gpu=torch.cuda.is_available(), gpu_ids=gpu_id)
         
         if GMSD_AVAILABLE:
             self.gmsd_metric = pyiqa.create_metric('gmsd', device=device).eval()
@@ -254,7 +256,7 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         # Phase 2: Use MSE (Rate-Distortion) loss
         out["rd_loss"] = self.mse(output["x_hat"], target)
         out["charbonnier"] = None  # Not used in Phase 2
-        out["lpips"] = None  # Not in loss; only computed for testing/eval
+        out["lpips"] = self.lpips(output["x_hat"], target).mean()
         
         # Compute GMSD loss (lower=better) via pyiqa. Inputs: (pred, ref) RGB [0,1].
         if self.gmsd_metric is not None:
