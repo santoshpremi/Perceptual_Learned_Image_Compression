@@ -154,21 +154,21 @@ def train_one_epoch_gan(
         loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
 
         out_criterion = criterion(out_net, d)
-        # Phase 2: RD + LPIPS + (1-CKDN) + Style + GAN + bpp
-        # CKDN is a quality score (higher=better), so use (1-CKDN) as loss to maximise quality
-        ckdn = out_criterion.get("ckdn")
-        ckdn_term = (config.get("lambda_ckdn", 0.5) * (1.0 - ckdn)) if (config is not None and ckdn is not None and isinstance(ckdn, torch.Tensor)) else ((1.0 - ckdn) if (ckdn is not None and isinstance(ckdn, torch.Tensor)) else torch.tensor(0.0, device=out_criterion["rd_loss"].device))
+        # Phase 2: RD + LPIPS + (1-DBCNN) + Style + GAN + bpp
+        # DBCNN is a NR quality score (higher=better), so use (1-DBCNN) as loss to maximise quality
+        dbcnn = out_criterion.get("dbcnn")
+        dbcnn_term = (config.get("lambda_dbcnn", 0.5) * (1.0 - dbcnn)) if (config is not None and dbcnn is not None and isinstance(dbcnn, torch.Tensor)) else ((1.0 - dbcnn) if (dbcnn is not None and isinstance(dbcnn, torch.Tensor)) else torch.tensor(0.0, device=out_criterion["rd_loss"].device))
         if config is not None:
             loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] +
                           config.get("lambda_lpips", 1.0) * out_criterion["lpips"] +
-                          ckdn_term +
+                          dbcnn_term +
                           config["lambda_style"] * out_criterion["style_loss"] +
                           config["lambda_gan"] * loss_G_fake +
                           config["lambda_bpp_rate"] * out_criterion["bpp_loss"])
         else:
             loss_G_total = (out_criterion["rd_loss"] +
                           out_criterion["lpips"] +
-                          ckdn_term +
+                          dbcnn_term +
                           out_criterion["style_loss"] +
                           loss_G_fake +
                           out_criterion["bpp_loss"])
@@ -191,16 +191,16 @@ def train_one_epoch_gan(
             tb_logger.add_scalar('{}'.format('[train]: aux_loss'), aux_loss.item(), current_step)
             if out_criterion.get("rd_loss") is not None:
                 tb_logger.add_scalar('{}'.format('[train]: rd_loss'), out_criterion["rd_loss"].item(), current_step)
-            if out_criterion.get("ckdn") is not None and isinstance(out_criterion["ckdn"], torch.Tensor):
-                tb_logger.add_scalar('{}'.format('[train]: ckdn_loss'), out_criterion["ckdn"].item(), current_step)
+            if out_criterion.get("dbcnn") is not None and isinstance(out_criterion["dbcnn"], torch.Tensor):
+                tb_logger.add_scalar('{}'.format('[train]: dbcnn'), out_criterion["dbcnn"].item(), current_step)
             if out_criterion.get("lpips") is not None and isinstance(out_criterion["lpips"], torch.Tensor):
-                tb_logger.add_scalar('{}'.format('[train]: lpips_val'), out_criterion["lpips"].item(), current_step)
+                tb_logger.add_scalar('{}'.format('[train]: lpips'), out_criterion["lpips"].item(), current_step)
           
         if i % 100 == 0:
-                # Phase 2: RD + LPIPS + (1-CKDN) + Style + GAN + bpp
+                # Phase 2: RD + LPIPS + (1-DBCNN) + Style + GAN + bpp
                 rd_str = f'{out_criterion["rd_loss"].item():.4f}'
-                ckdn_val = out_criterion.get("ckdn")
-                ckdn_str = f'{ckdn_val.item():.4f}' if isinstance(ckdn_val, torch.Tensor) else 'N/A'
+                dbcnn_val = out_criterion.get("dbcnn")
+                dbcnn_str = f'{dbcnn_val.item():.4f}' if isinstance(dbcnn_val, torch.Tensor) else 'N/A'
                 lpips_val = out_criterion.get("lpips")
                 lpips_str = f'{lpips_val.item():.4f}' if isinstance(lpips_val, torch.Tensor) else 'N/A'
 
@@ -211,7 +211,7 @@ def train_one_epoch_gan(
                     f'Loss: {loss_G_total.item():.4f} | '
                     f'MSE (RD) loss: {rd_str} | '
                     f'LPIPS loss: {lpips_str} | '
-                    f'CKDN loss: {ckdn_str} | '
+                    f'DBCNN: {dbcnn_str} | '
                     f'Style loss: {out_criterion["style_loss"].item():.4f} | '
                     f'GAN loss: {loss_G_fake.item():.4f} | '
                     f'Bpp rate loss: {out_criterion["bpp_loss"].item():.2f} | '

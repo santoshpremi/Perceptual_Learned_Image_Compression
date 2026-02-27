@@ -14,14 +14,14 @@ except ImportError:
     print("Warning: piq library not found. Install with: pip install piq")
     PIQ_AVAILABLE = False
 
-# Add imports for GMSD and CKDN (Phase 2) via pyiqa
+# Add imports for DBCNN (Phase 2, No-Reference metric) via pyiqa
 try:
     import pyiqa
     GMSD_AVAILABLE = True
-    CKDN_AVAILABLE = True  # set False in __init__ if create_metric('ckdn') fails
+    DBCNN_AVAILABLE = True  # set False in __init__ if create_metric('dbcnn') fails
 except ImportError:
     GMSD_AVAILABLE = False
-    CKDN_AVAILABLE = False
+    DBCNN_AVAILABLE = False
     pyiqa = None
     print("Warning: pyiqa not found. Install with: pip install pyiqa") 
 
@@ -212,11 +212,12 @@ class RateDistortionPOELICLoss(nn.Module):
 
 
 class RateDistortionPOELICLossPhase2(nn.Module):
-    """Phase 2 loss: MSE (RD) + CKDN + Style + GAN + bpp. LPIPS/GMSD not in training.
+    """Phase 2 loss: RD + LPIPS + (1-DBCNN) + Style + GAN + bpp.
     
-    Training loss: RD + CKDN + Style + GAN + bpp rate.
-    LPIPS is still computed and returned for validation/evaluation only (not in training loss).
-    GMSD is not computed (removed from Phase 2 training).
+    Training loss: RD + LPIPS + (1-DBCNN) + Style + GAN + bpp rate.
+    LPIPS: full-reference perceptual loss (VGG-based, matches target).
+    DBCNN: no-reference blind quality metric (naturalness, no target needed).
+    GMSD removed from Phase 2.
     """
 
     def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None, metrics='mse'):
@@ -225,23 +226,23 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         self.gan = GANLoss()
         self.style = StyleLoss()
         self.device = device
-        # LPIPS: only for validation/evaluation logging (not in training loss)
+        # LPIPS: full-reference perceptual loss (used in training)
         self.lpips = ps.PerceptualLoss(model='net-lin', net='vgg',
                                        use_gpu=torch.cuda.is_available(), gpu_ids=gpu_id)
 
         if pyiqa is not None:
             try:
-                self.ckdn_metric = pyiqa.create_metric('ckdn', device=device).eval()
-                self._ckdn_available = True
-                print("CKDN loss initialized successfully (pyiqa)")
+                self.dbcnn_metric = pyiqa.create_metric('dbcnn', metric_mode='NR', device=device).eval()
+                self._dbcnn_available = True
+                print("DBCNN (NR) loss initialized successfully (pyiqa)")
             except Exception as e:
-                self.ckdn_metric = None
-                self._ckdn_available = False
-                print(f"Warning: CKDN not available: {e}. Install/update pyiqa.")
+                self.dbcnn_metric = None
+                self._dbcnn_available = False
+                print(f"Warning: DBCNN not available: {e}. Install/update pyiqa.")
         else:
-            self.ckdn_metric = None
-            self._ckdn_available = False
-            print("Warning: CKDN not available (pyiqa required).")
+            self.dbcnn_metric = None
+            self._dbcnn_available = False
+            print("Warning: DBCNN not available (pyiqa required).")
 
         print(gpu_id)
         self.lmbda = lmbda
@@ -264,26 +265,25 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         out["rd_loss"] = self.mse(output["x_hat"], target)
         out["charbonnier"] = None
 
-        # LPIPS: for validation/evaluation only (not in training loss)
+        # LPIPS: full-reference perceptual loss (used in training)
         out["lpips"] = self.lpips(output["x_hat"], target).mean()
 
         # GMSD: removed from Phase 2
         out["gmsd"] = None
 
-        # CKDN: used in training loss (lower is better for typical IQA; check CKDN convention)
-        if self._ckdn_available and self.ckdn_metric is not None:
+        # DBCNN: no-reference blind IQA (higher=better, use 1-DBCNN as loss)
+        if self._dbcnn_available and self.dbcnn_metric is not None:
             x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
-            target_clamped = torch.clamp(target, 0.0, 1.0)
-            if torch.isfinite(x_hat_clamped).all() and torch.isfinite(target_clamped).all():
+            if torch.isfinite(x_hat_clamped).all():
                 try:
-                    ckdn_val = self.ckdn_metric(x_hat_clamped, target_clamped)
-                    out["ckdn"] = ckdn_val.mean() if ckdn_val.numel() > 1 else ckdn_val
+                    dbcnn_val = self.dbcnn_metric(x_hat_clamped)
+                    out["dbcnn"] = dbcnn_val.mean() if dbcnn_val.numel() > 1 else dbcnn_val
                 except Exception:
-                    out["ckdn"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
+                    out["dbcnn"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
             else:
-                out["ckdn"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
+                out["dbcnn"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
         else:
-            out["ckdn"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype, requires_grad=False)
+            out["dbcnn"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype, requires_grad=False)
 
         x_hat_feat = [feat for feat in x_hat_feat]
         target_feat = [feat for feat in target_feat]
