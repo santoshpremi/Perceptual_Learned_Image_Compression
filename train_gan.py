@@ -128,7 +128,7 @@ def main():
     optimizer_D = torch.optim.Adam(net_disc.parameters(), lr=args.lr_D)
     lr_scheduler_D = optim.lr_scheduler.MultiStepLR(optimizer_D, milestones=[80, 100], gamma=0.1)
 
-    # Phase 2 loss: MSE (RD) + CKDN + Style + GAN + bpp (LPIPS only for val/eval; GMSD removed)
+    # Phase 2 loss: RD + LPIPS + (1-CKDN) + Style + GAN + bpp (no GMSD)
     # Use metrics='mse' for MSE-based or 'ms-ssim' for MS-SSIM based rate-distortion
     criterion = RateDistortionPOELICLossPhase2(lmbda=args.lmbda, device=device, gpu_id=args.gpu_id, metrics='mse')
     

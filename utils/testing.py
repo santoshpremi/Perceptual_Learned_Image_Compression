@@ -314,7 +314,7 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     device = next(model.parameters()).device
     gan_loss = GANLoss('hinge', loss_weight=2.0, real_label_val=1.0, fake_label_val=0.0)
 
-    # LPIPS for evaluation only (not in training loss)
+    # LPIPS model: used as fallback if criterion does not return lpips (should not happen in Phase 2)
     lpips_model = ps.PerceptualLoss(model='net-lin', net='vgg',
                                    use_gpu=torch.cuda.is_available(),
                                    gpu_ids=[0])
@@ -364,18 +364,20 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
 
             pred_fake = model_disc(out_net["x_hat"])
             loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
-            # Phase 2: RD + (1-CKDN) + Style + GAN + bpp for "best" (LPIPS only for evaluation logging)
+            # Phase 2: RD + LPIPS + (1-CKDN) + Style + GAN + bpp (matches training objective)
             # CKDN is a quality score (higher=better), so use (1-CKDN) as loss to maximise quality
             ckdn_val = out_criterion.get("ckdn")
-            ckdn_term = (config.get("lambda_ckdn", 1.0) * (1.0 - ckdn_val)) if (config is not None and ckdn_val is not None and isinstance(ckdn_val, torch.Tensor)) else ((1.0 - ckdn_val) if (ckdn_val is not None and isinstance(ckdn_val, torch.Tensor)) else torch.tensor(0.0, device=out_criterion["rd_loss"].device))
+            ckdn_term = (config.get("lambda_ckdn", 0.5) * (1.0 - ckdn_val)) if (config is not None and ckdn_val is not None and isinstance(ckdn_val, torch.Tensor)) else ((1.0 - ckdn_val) if (ckdn_val is not None and isinstance(ckdn_val, torch.Tensor)) else torch.tensor(0.0, device=out_criterion["rd_loss"].device))
             if config is not None:
                 loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] +
+                              config.get("lambda_lpips", 1.0) * out_criterion["lpips"] +
                               ckdn_term +
                               config["lambda_style"] * out_criterion["style_loss"] +
                               config["lambda_gan"] * loss_G_fake +
                               config["lambda_bpp_rate"] * out_criterion["bpp_loss"])
             else:
                 loss_G_total = (out_criterion["rd_loss"] +
+                              out_criterion["lpips"] +
                               ckdn_term +
                               out_criterion["style_loss"] +
                               loss_G_fake +
