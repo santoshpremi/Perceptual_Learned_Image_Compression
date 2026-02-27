@@ -324,10 +324,11 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     bpp_loss = AverageMeter()
     charbonnier = AverageMeter()
     rd_loss = AverageMeter()
+    ckdn = AverageMeter()
     lpips = AverageMeter()
     gmsd = AverageMeter()
-    style_loss = AverageMeter() 
-    adv_loss = AverageMeter() 
+    style_loss = AverageMeter()
+    adv_loss = AverageMeter()
     aux_loss = AverageMeter()
     psnr = AverageMeter()
     ms_ssim = AverageMeter()
@@ -363,29 +364,30 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
 
             pred_fake = model_disc(out_net["x_hat"])
             loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
-            # Phase 2: MSE (RD) + LPIPS + GMSD + Style + GAN + bpp rate (same as training for "best" checkpoint)
+            # Phase 2: RD + CKDN + Style + GAN + bpp for "best" (LPIPS only for evaluation logging)
+            ckdn_val = out_criterion.get("ckdn")
+            ckdn_term = (config.get("lambda_ckdn", 1.0) * ckdn_val) if (config is not None and ckdn_val is not None and isinstance(ckdn_val, torch.Tensor)) else (ckdn_val if (ckdn_val is not None and isinstance(ckdn_val, torch.Tensor)) else torch.tensor(0.0, device=out_criterion["rd_loss"].device))
             if config is not None:
-                loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] + 
-                              config.get("lambda_lpips", 1.0) * out_criterion["lpips"] +
-                              config.get("lambda_gmsd", 1.0) * out_criterion["gmsd"] + 
-                              config["lambda_style"] * out_criterion["style_loss"] + 
-                              config["lambda_gan"] * loss_G_fake + 
+                loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] +
+                              ckdn_term +
+                              config["lambda_style"] * out_criterion["style_loss"] +
+                              config["lambda_gan"] * loss_G_fake +
                               config["lambda_bpp_rate"] * out_criterion["bpp_loss"])
             else:
-                loss_G_total = (out_criterion["rd_loss"] + 
-                              out_criterion["lpips"] +
-                              out_criterion["gmsd"] + 
-                              out_criterion["style_loss"] + 
-                              loss_G_fake + 
+                loss_G_total = (out_criterion["rd_loss"] +
+                              ckdn_term +
+                              out_criterion["style_loss"] +
+                              loss_G_fake +
                               out_criterion["bpp_loss"])
 
             aux_loss.update(model.aux_loss())
             bpp_loss.update(out_criterion["bpp_loss"].item())
             loss.update(loss_G_total.item())
-            if out_criterion.get("gmsd") is not None and isinstance(out_criterion["gmsd"], torch.Tensor):
-                gmsd.update(out_criterion["gmsd"].item())
+            if ckdn_val is not None and isinstance(ckdn_val, torch.Tensor):
+                ckdn.update(ckdn_val.item())
+            # GMSD removed from Phase 2; meter stays empty (for backward compat only)
             style_loss.update(out_criterion["style_loss"].item())
-            # LPIPS: use criterion output when available (Phase 2), else compute for logging
+            # LPIPS: for validation/evaluation only (not in aggregate loss)
             if out_criterion.get("lpips") is not None and isinstance(out_criterion["lpips"], torch.Tensor):
                 lpips.update(out_criterion["lpips"].item())
             else:
@@ -413,6 +415,8 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     tb_logger.add_scalar('{}'.format('[val]: bpp_loss'), bpp_loss.avg, epoch + 1)
     tb_logger.add_scalar('{}'.format('[val]: psnr'), psnr.avg, epoch + 1)
     tb_logger.add_scalar('{}'.format('[val]: ms-ssim'), ms_ssim.avg, epoch + 1)
+    if ckdn.count > 0:
+        tb_logger.add_scalar('{}'.format('[val]: ckdn'), ckdn.avg, epoch + 1)
     if lpips.count > 0:
         tb_logger.add_scalar('{}'.format('[val]: lpips'), lpips.avg, epoch + 1)
     if gmsd.count > 0:
@@ -422,17 +426,19 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
         tb_logger.add_scalar('{}'.format('[val]: rd_loss'), rd_loss.avg, epoch + 1)
     if charbonnier.count > 0:
         tb_logger.add_scalar('{}'.format('[val]: charbonnier loss'), charbonnier.avg, epoch + 1)
-    
+
     rd_str = f"{rd_loss.avg:.4f}" if rd_loss.count > 0 else "N/A"
     charbonnier_str = f"{charbonnier.avg:.4f}" if charbonnier.count > 0 else "N/A"
+    ckdn_str = f"{ckdn.avg:.4f}" if ckdn.count > 0 else "N/A"
     lpips_str = f"{lpips.avg:.4f}" if lpips.count > 0 else "N/A"
     gmsd_str = f"{gmsd.avg:.4f}" if gmsd.count > 0 else "N/A"
-    
+
     logger_val.info(
         f"Test epoch {epoch + 1}: Average losses: "
         f"Loss: {loss.avg:.4f} | "
         f"RD loss: {rd_str} | "
         f"Charbonnier loss: {charbonnier_str} | "
+        f"CKDN loss: {ckdn_str} | "
         f"LPIPS loss: {lpips_str} | "
         f"GMSD loss: {gmsd_str} | "
         f"Style loss: {style_loss.avg:.4f} | "

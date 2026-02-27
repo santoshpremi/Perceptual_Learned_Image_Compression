@@ -14,12 +14,14 @@ except ImportError:
     print("Warning: piq library not found. Install with: pip install piq")
     PIQ_AVAILABLE = False
 
-# Add imports for GMSD (Phase 2 only - lightweight perceptual loss) via pyiqa
+# Add imports for GMSD and CKDN (Phase 2) via pyiqa
 try:
     import pyiqa
     GMSD_AVAILABLE = True
+    CKDN_AVAILABLE = True  # set False in __init__ if create_metric('ckdn') fails
 except ImportError:
     GMSD_AVAILABLE = False
+    CKDN_AVAILABLE = False
     pyiqa = None
     print("Warning: pyiqa not found. Install with: pip install pyiqa") 
 
@@ -210,31 +212,37 @@ class RateDistortionPOELICLoss(nn.Module):
 
 
 class RateDistortionPOELICLossPhase2(nn.Module):
-    """Phase 2 loss: HFLIC Phase 2 loss with MSE, LPIPS, GMSD and GAN.
+    """Phase 2 loss: MSE (RD) + CKDN + Style + GAN + bpp. LPIPS/GMSD not in training.
     
-    Uses MSE (Rate-Distortion) loss for Phase 2.
-    Includes: MSE (RD) + LPIPS + GMSD + Style + GAN + bpp rate
-    GMSD: lower is better, used directly as loss. Lightweight gradient-based metric.
-    LPIPS: perceptual loss (same as Phase 1) for improved perceptual quality.
+    Training loss: RD + CKDN + Style + GAN + bpp rate.
+    LPIPS is still computed and returned for validation/evaluation only (not in training loss).
+    GMSD is not computed (removed from Phase 2 training).
     """
 
     def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None, metrics='mse'):
         super().__init__()
-        # Use MSE for rate-distortion loss in Phase 2
         self.mse = nn.MSELoss()
         self.gan = GANLoss()
         self.style = StyleLoss()
         self.device = device
+        # LPIPS: only for validation/evaluation logging (not in training loss)
         self.lpips = ps.PerceptualLoss(model='net-lin', net='vgg',
                                        use_gpu=torch.cuda.is_available(), gpu_ids=gpu_id)
-        
-        if GMSD_AVAILABLE:
-            self.gmsd_metric = pyiqa.create_metric('gmsd', device=device).eval()
-            print("GMSD loss initialized successfully (pyiqa, lightweight)")
+
+        if pyiqa is not None:
+            try:
+                self.ckdn_metric = pyiqa.create_metric('ckdn', device=device).eval()
+                self._ckdn_available = True
+                print("CKDN loss initialized successfully (pyiqa)")
+            except Exception as e:
+                self.ckdn_metric = None
+                self._ckdn_available = False
+                print(f"Warning: CKDN not available: {e}. Install/update pyiqa.")
         else:
-            self.gmsd_metric = None
-            print("Warning: GMSD not available. Install pyiqa: pip install pyiqa")
-        
+            self.ckdn_metric = None
+            self._ckdn_available = False
+            print("Warning: CKDN not available (pyiqa required).")
+
         print(gpu_id)
         self.lmbda = lmbda
         self.metrics = metrics
@@ -244,32 +252,39 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         N, _, H, W = target.size()
         out = {}
         num_pixels = N * H * W
-        
+
         out["bpp_loss"] = sum(
             (torch.log(likelihoods).sum() / (-math.log(2) * num_pixels))
             for likelihoods in output["likelihoods"].values()
         )
-    
+
         x_hat_feat = self.vgg(output["x_hat"])
         target_feat = self.vgg(target)
 
-        # Phase 2: Use MSE (Rate-Distortion) loss
         out["rd_loss"] = self.mse(output["x_hat"], target)
-        out["charbonnier"] = None  # Not used in Phase 2
+        out["charbonnier"] = None
+
+        # LPIPS: for validation/evaluation only (not in training loss)
         out["lpips"] = self.lpips(output["x_hat"], target).mean()
-        
-        # Compute GMSD loss (lower=better) via pyiqa. Inputs: (pred, ref) RGB [0,1].
-        if self.gmsd_metric is not None:
+
+        # GMSD: removed from Phase 2
+        out["gmsd"] = None
+
+        # CKDN: used in training loss (lower is better for typical IQA; check CKDN convention)
+        if self._ckdn_available and self.ckdn_metric is not None:
             x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
             target_clamped = torch.clamp(target, 0.0, 1.0)
             if torch.isfinite(x_hat_clamped).all() and torch.isfinite(target_clamped).all():
-                gmsd_val = self.gmsd_metric(x_hat_clamped, target_clamped)
-                out["gmsd"] = gmsd_val.mean() if gmsd_val.numel() > 1 else gmsd_val
+                try:
+                    ckdn_val = self.ckdn_metric(x_hat_clamped, target_clamped)
+                    out["ckdn"] = ckdn_val.mean() if ckdn_val.numel() > 1 else ckdn_val
+                except Exception:
+                    out["ckdn"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
             else:
-                out["gmsd"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
+                out["ckdn"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
         else:
-            out["gmsd"] = torch.tensor(0.0, device=output["x_hat"].device, requires_grad=False)
-        
+            out["ckdn"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype, requires_grad=False)
+
         x_hat_feat = [feat for feat in x_hat_feat]
         target_feat = [feat for feat in target_feat]
         style_loss = 0.0

@@ -16,9 +16,9 @@ def model_config():
         "lambda_style": 1e2,
         "lambda_bpp_rate": 0.30,  # bpp rate loss weight
         
-        # Phase 2: Perceptual loss weights (MSE + LPIPS + GMSD + Style + GAN)
+        # Phase 2: RD + CKDN + Style + GAN (LPIPS only for val/eval; no GMSD)
         "lambda_rd": 0.01,  # MSE (Rate-Distortion) loss weight for Phase 2
-        "lambda_gmsd": 1.0,  # GMSD perceptual loss weight (Phase 2, lightweight)
+        "lambda_ckdn": 1.0,  # CKDN perceptual loss weight (Phase 2)
         "lambda_face": 0,
         "lambda_gan": 1,  # GAN adversarial loss weight for Phase 2
 
