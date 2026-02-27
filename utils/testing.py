@@ -364,9 +364,10 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
 
             pred_fake = model_disc(out_net["x_hat"])
             loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
-            # Phase 2: RD + CKDN + Style + GAN + bpp for "best" (LPIPS only for evaluation logging)
+            # Phase 2: RD + (1-CKDN) + Style + GAN + bpp for "best" (LPIPS only for evaluation logging)
+            # CKDN is a quality score (higher=better), so use (1-CKDN) as loss to maximise quality
             ckdn_val = out_criterion.get("ckdn")
-            ckdn_term = (config.get("lambda_ckdn", 1.0) * ckdn_val) if (config is not None and ckdn_val is not None and isinstance(ckdn_val, torch.Tensor)) else (ckdn_val if (ckdn_val is not None and isinstance(ckdn_val, torch.Tensor)) else torch.tensor(0.0, device=out_criterion["rd_loss"].device))
+            ckdn_term = (config.get("lambda_ckdn", 1.0) * (1.0 - ckdn_val)) if (config is not None and ckdn_val is not None and isinstance(ckdn_val, torch.Tensor)) else ((1.0 - ckdn_val) if (ckdn_val is not None and isinstance(ckdn_val, torch.Tensor)) else torch.tensor(0.0, device=out_criterion["rd_loss"].device))
             if config is not None:
                 loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] +
                               ckdn_term +

@@ -154,9 +154,10 @@ def train_one_epoch_gan(
         loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
 
         out_criterion = criterion(out_net, d)
-        # Phase 2: MSE (RD) + CKDN + Style + GAN + bpp (no LPIPS, no GMSD in training)
+        # Phase 2: MSE (RD) + (1-CKDN) + Style + GAN + bpp (no LPIPS, no GMSD in training)
+        # CKDN is a quality score (higher=better), so use (1-CKDN) as loss to maximise quality
         ckdn = out_criterion.get("ckdn")
-        ckdn_term = (config.get("lambda_ckdn", 1.0) * ckdn) if (config is not None and ckdn is not None and isinstance(ckdn, torch.Tensor)) else (ckdn if (ckdn is not None and isinstance(ckdn, torch.Tensor)) else torch.tensor(0.0, device=out_criterion["rd_loss"].device))
+        ckdn_term = (config.get("lambda_ckdn", 1.0) * (1.0 - ckdn)) if (config is not None and ckdn is not None and isinstance(ckdn, torch.Tensor)) else ((1.0 - ckdn) if (ckdn is not None and isinstance(ckdn, torch.Tensor)) else torch.tensor(0.0, device=out_criterion["rd_loss"].device))
         if config is not None:
             loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] +
                           ckdn_term +
