@@ -128,9 +128,9 @@ def main():
     optimizer_D = torch.optim.Adam(net_disc.parameters(), lr=args.lr_D)
     lr_scheduler_D = optim.lr_scheduler.MultiStepLR(optimizer_D, milestones=[80, 100], gamma=0.1)
 
-    # Phase 2 loss: RD + LPIPS + (1-TOPIQ) + Style + GAN + bpp
+    # Phase 2 loss: RD + LPIPS + (1-VSI) + Style + GAN + bpp
     # LPIPS: VGG-based perceptual loss (low-level feature matching)
-    # TOPIQ: Top-down semantic-guided IQA (ResNet50, 2023, high-level semantic quality)
+    # VSI: Visual Saliency-induced Index (FR, saliency-weighted quality)
     # Use metrics='mse' for MSE-based or 'ms-ssim' for MS-SSIM based rate-distortion
     criterion = RateDistortionPOELICLossPhase2(lmbda=args.lmbda, device=device, gpu_id=args.gpu_id, metrics='mse')
     

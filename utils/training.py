@@ -154,23 +154,23 @@ def train_one_epoch_gan(
         loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
 
         out_criterion = criterion(out_net, d)
-        # Phase 2: RD + LPIPS + (1-TOPIQ) + Style + GAN + bpp
-        # TOPIQ is a FR quality score (higher=better), so use (1-TOPIQ) as loss
-        topiq = out_criterion.get("topiq")
+        # Phase 2: RD + LPIPS + (1-VSI) + Style + GAN + bpp
+        # VSI is a FR quality score (higher=better), so use (1-VSI) as loss
+        vsi = out_criterion.get("vsi")
         
-        topiq_term = (config.get("lambda_topiq", 0.8) * (1.0 - topiq)) if (config is not None and topiq is not None and isinstance(topiq, torch.Tensor)) else ((1.0 - topiq) if (topiq is not None and isinstance(topiq, torch.Tensor)) else torch.tensor(0.0, device=out_criterion["rd_loss"].device))
+        vsi_term = (config.get("lambda_vsi", 0.8) * (1.0 - vsi)) if (config is not None and vsi is not None and isinstance(vsi, torch.Tensor)) else ((1.0 - vsi) if (vsi is not None and isinstance(vsi, torch.Tensor)) else torch.tensor(0.0, device=out_criterion["rd_loss"].device))
         
         if config is not None:
             loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] +
                           config.get("lambda_lpips", 0.6) * out_criterion["lpips"] +
-                          topiq_term +
+                          vsi_term +
                           config["lambda_style"] * out_criterion["style_loss"] +
                           config["lambda_gan"] * loss_G_fake +
                           config["lambda_bpp_rate"] * out_criterion["bpp_loss"])
         else:
             loss_G_total = (out_criterion["rd_loss"] +
                           out_criterion["lpips"] +
-                          topiq_term +
+                          vsi_term +
                           out_criterion["style_loss"] +
                           loss_G_fake +
                           out_criterion["bpp_loss"])
@@ -193,16 +193,16 @@ def train_one_epoch_gan(
             tb_logger.add_scalar('{}'.format('[train]: aux_loss'), aux_loss.item(), current_step)
             if out_criterion.get("rd_loss") is not None:
                 tb_logger.add_scalar('{}'.format('[train]: rd_loss'), out_criterion["rd_loss"].item(), current_step)
-            if out_criterion.get("topiq") is not None and isinstance(out_criterion["topiq"], torch.Tensor):
-                tb_logger.add_scalar('{}'.format('[train]: topiq'), out_criterion["topiq"].item(), current_step)
+            if out_criterion.get("vsi") is not None and isinstance(out_criterion["vsi"], torch.Tensor):
+                tb_logger.add_scalar('{}'.format('[train]: vsi'), out_criterion["vsi"].item(), current_step)
             if out_criterion.get("lpips") is not None and isinstance(out_criterion["lpips"], torch.Tensor):
                 tb_logger.add_scalar('{}'.format('[train]: lpips'), out_criterion["lpips"].item(), current_step)
           
         if i % 100 == 0:
-                # Phase 2: RD + LPIPS + (1-TOPIQ) + Style + GAN + bpp
+                # Phase 2: RD + LPIPS + (1-VSI) + Style + GAN + bpp
                 rd_str = f'{out_criterion["rd_loss"].item():.4f}'
-                topiq_val = out_criterion.get("topiq")
-                topiq_str = f'{topiq_val.item():.4f}' if isinstance(topiq_val, torch.Tensor) else 'N/A'
+                vsi_val = out_criterion.get("vsi")
+                vsi_str = f'{vsi_val.item():.4f}' if isinstance(vsi_val, torch.Tensor) else 'N/A'
                 lpips_val = out_criterion.get("lpips")
                 lpips_str = f'{lpips_val.item():.4f}' if isinstance(lpips_val, torch.Tensor) else 'N/A'
 
@@ -213,7 +213,7 @@ def train_one_epoch_gan(
                     f'Loss: {loss_G_total.item():.4f} | '
                     f'MSE (RD): {rd_str} | '
                     f'LPIPS: {lpips_str} | '
-                    f'TOPIQ: {topiq_str} | '
+                    f'VSI: {vsi_str} | '
                     f'Style: {out_criterion["style_loss"].item():.4f} | '
                     f'GAN: {loss_G_fake.item():.4f} | '
                     f'Bpp: {out_criterion["bpp_loss"].item():.2f} | '

@@ -14,12 +14,12 @@ except ImportError:
     print("Warning: piq library not found. Install with: pip install piq")
     PIQ_AVAILABLE = False
 
-# Add imports for TOPIQ (Phase 2, Full-Reference metric) via pyiqa
+# Add imports for VSI (Phase 2, Full-Reference metric) via pyiqa
 try:
     import pyiqa
-    TOPIQ_AVAILABLE = True  # set False in __init__ if create_metric fails
+    VSI_AVAILABLE = True  # set False in __init__ if create_metric fails
 except ImportError:
-    TOPIQ_AVAILABLE = False
+    VSI_AVAILABLE = False
     pyiqa = None
     print("Warning: pyiqa not found. Install with: pip install pyiqa") 
 
@@ -210,21 +210,16 @@ class RateDistortionPOELICLoss(nn.Module):
 
 
 class RateDistortionPOELICLossPhase2(nn.Module):
-    """Phase 2 loss: RD + LPIPS + (1-TOPIQ) + Style + GAN + bpp.
+    """Phase 2 loss: RD + LPIPS + (1-VSI) + Style + GAN + bpp.
     
-    Training loss: RD + LPIPS + (1-TOPIQ) + Style + GAN + bpp rate.
+    Training loss: RD + LPIPS + (1-VSI) + Style + GAN + bpp rate.
     
-    LPIPS: Learned Perceptual Image Patch Similarity (VGG-based, AlexNet variant)
-           - Layer-wise perceptual feature matching
+    LPIPS: Learned Perceptual Image Patch Similarity (VGG-based)
            - Full-reference, low-level perceptual similarity
            
-    TOPIQ: Top-down semantic-guided IQA (ResNet50, 2023)
-           - Cross-scale attention with semantic propagation
-           - Focuses on semantically important distortions
-           - Full-reference, high-level semantic quality
-           
-    Complementary: LPIPS (low-level perceptual) + TOPIQ (high-level semantic).
-    Both full-reference metrics. TOPIQ outputs 0-1 range (higher=better).
+    VSI: Visual Saliency-induced Index (full-reference)
+         - Quality weighted by visual saliency (where humans look)
+         - Higher = better; use (1 - VSI) as loss
     """
 
     def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None, metrics='mse'):
@@ -238,20 +233,20 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         self.lpips = ps.PerceptualLoss(model='net-lin', net='vgg',
                                        use_gpu=torch.cuda.is_available(), gpu_ids=gpu_id)
 
-        # TOPIQ: Top-down semantic-guided IQA (full-reference)
+        # VSI: Visual Saliency-induced Index (full-reference, higher=better)
         if pyiqa is not None:
             try:
-                self.topiq_metric = pyiqa.create_metric('topiq_fr', device=device).eval()
-                self._topiq_available = True
-                print("✓ TOPIQ (FR) initialized: Semantic top-down, ResNet50")
+                self.vsi_metric = pyiqa.create_metric('vsi', device=device).eval()
+                self._vsi_available = True
+                print("✓ VSI (FR) initialized: Visual Saliency-induced Index")
             except Exception as e:
-                self.topiq_metric = None
-                self._topiq_available = False
-                print(f"✗ TOPIQ not available: {e}")
+                self.vsi_metric = None
+                self._vsi_available = False
+                print(f"✗ VSI not available: {e}")
         else:
-            self.topiq_metric = None
-            self._topiq_available = False
-            print("✗ TOPIQ not available (pyiqa required)")
+            self.vsi_metric = None
+            self._vsi_available = False
+            print("✗ VSI not available (pyiqa required)")
 
         print(f"GPU ID: {gpu_id}")
         self.lmbda = lmbda
@@ -284,21 +279,21 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         # LPIPS: Full-reference perceptual loss (used in training)
         out["lpips"] = self.lpips(output["x_hat"], target).mean()
 
-        # TOPIQ: Top-down semantic-guided IQA (FR, higher=better, use 1-TOPIQ as loss)
-        if self._topiq_available and self.topiq_metric is not None:
+        # VSI: Visual Saliency-induced Index (FR, higher=better, use 1-VSI as loss)
+        if self._vsi_available and self.vsi_metric is not None:
             x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
             target_clamped = torch.clamp(target, 0.0, 1.0)
             if torch.isfinite(x_hat_clamped).all() and torch.isfinite(target_clamped).all():
                 try:
-                    topiq_score = self.topiq_metric(x_hat_clamped, target_clamped)
-                    out["topiq"] = topiq_score.mean() if topiq_score.numel() > 1 else topiq_score
+                    vsi_score = self.vsi_metric(x_hat_clamped, target_clamped)
+                    out["vsi"] = vsi_score.mean() if vsi_score.numel() > 1 else vsi_score
                 except Exception as e:
-                    print(f"TOPIQ computation failed: {e}")
-                    out["topiq"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
+                    print(f"VSI computation failed: {e}")
+                    out["vsi"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
             else:
-                out["topiq"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
+                out["vsi"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
         else:
-            out["topiq"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype, requires_grad=False)
+            out["vsi"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype, requires_grad=False)
 
         x_hat_feat = [feat for feat in x_hat_feat]
         target_feat = [feat for feat in target_feat]
