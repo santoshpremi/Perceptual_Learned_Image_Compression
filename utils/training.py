@@ -153,7 +153,9 @@ def train_one_epoch_gan(
         pred_fake = model_disc(out_net["x_hat"])
         loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
 
-        out_criterion = criterion(out_net, d)
+        # Skip LPIPS computation during training to save GPU memory (~500MB)
+        # LPIPS is only needed for validation logging, not in training loss
+        out_criterion = criterion(out_net, d, compute_lpips=False)
         # Phase 2: RD + (1-AHIQ) + (1-TOPIQ) + Style + GAN + bpp
         # AHIQ and TOPIQ are FR quality scores (higher=better), so use (1-score) as loss
         ahiq = out_criterion.get("ahiq")

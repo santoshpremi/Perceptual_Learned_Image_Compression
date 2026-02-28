@@ -277,7 +277,16 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         self.metrics = metrics
         self.vgg = Vgg16().to(device).eval()
 
-    def forward(self, output, target):
+    def forward(self, output, target, compute_lpips=False):
+        """
+        Forward pass for Phase 2 loss computation.
+        
+        Args:
+            output: Model output dict with 'x_hat' and 'likelihoods'
+            target: Ground truth images
+            compute_lpips: If True, compute LPIPS (for validation only).
+                          If False, skip LPIPS to save GPU memory during training.
+        """
         N, _, H, W = target.size()
         out = {}
         num_pixels = N * H * W
@@ -293,8 +302,12 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         out["rd_loss"] = self.mse(output["x_hat"], target)
         out["charbonnier"] = None
 
-        # LPIPS: kept for validation/logging only (not in training loss)
-        out["lpips"] = self.lpips(output["x_hat"], target).mean()
+        # LPIPS: Only compute during validation to save GPU memory
+        # Training loss uses AHIQ + TOPIQ instead
+        if compute_lpips:
+            out["lpips"] = self.lpips(output["x_hat"], target).mean()
+        else:
+            out["lpips"] = None
 
         # GMSD: removed from Phase 2
         out["gmsd"] = None

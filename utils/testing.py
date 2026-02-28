@@ -361,7 +361,8 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
                 out_net['x_hat'] = out_net['x_hat'][:, :, :H, :W]
             
             # Now compute loss with correctly sized tensors
-            out_criterion = criterion(out_net, d)
+            # Request LPIPS computation during validation for logging
+            out_criterion = criterion(out_net, d, compute_lpips=True)
 
             pred_fake = model_disc(out_net["x_hat"])
             loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
