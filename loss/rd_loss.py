@@ -14,14 +14,16 @@ except ImportError:
     print("Warning: piq library not found. Install with: pip install piq")
     PIQ_AVAILABLE = False
 
-# Add imports for DBCNN (Phase 2, No-Reference metric) via pyiqa
+# Add imports for AHIQ and TOPIQ (Phase 2, Full-Reference metrics) via pyiqa
 try:
     import pyiqa
     GMSD_AVAILABLE = True
-    DBCNN_AVAILABLE = True  # set False in __init__ if create_metric('dbcnn') fails
+    AHIQ_AVAILABLE = True  # set False in __init__ if create_metric fails
+    TOPIQ_AVAILABLE = True  # set False in __init__ if create_metric fails
 except ImportError:
     GMSD_AVAILABLE = False
-    DBCNN_AVAILABLE = False
+    AHIQ_AVAILABLE = False
+    TOPIQ_AVAILABLE = False
     pyiqa = None
     print("Warning: pyiqa not found. Install with: pip install pyiqa") 
 
@@ -212,12 +214,21 @@ class RateDistortionPOELICLoss(nn.Module):
 
 
 class RateDistortionPOELICLossPhase2(nn.Module):
-    """Phase 2 loss: RD + LPIPS + (1-DBCNN) + Style + GAN + bpp.
+    """Phase 2 loss: RD + (1-AHIQ) + (1-TOPIQ) + Style + GAN + bpp.
     
-    Training loss: RD + LPIPS + (1-DBCNN) + Style + GAN + bpp rate.
-    LPIPS: full-reference perceptual loss (VGG-based, matches target).
-    DBCNN: no-reference blind quality metric (naturalness, no target needed).
-    GMSD removed from Phase 2.
+    Training loss: RD + (1-AHIQ) + (1-TOPIQ) + Style + GAN + bpp rate.
+    
+    AHIQ: Attention-based Hybrid IQA (ViT+CNN, bottom-up, CVPR 2022)
+          - Combines spatial relationships and local texture
+          - Deformable convolution guided by semantic info
+          
+    TOPIQ: Top-down semantic-guided IQA (ResNet50, 2023)
+           - Cross-scale attention with semantic propagation
+           - Focuses on semantically important distortions
+           
+    Both are full-reference metrics (0-1 range, higher=better).
+    Complementary: AHIQ (attention, bottom-up) + TOPIQ (semantic, top-down).
+    LPIPS kept for validation logging only, not in training loss.
     """
 
     def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None, metrics='mse'):
@@ -226,25 +237,42 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         self.gan = GANLoss()
         self.style = StyleLoss()
         self.device = device
-        # LPIPS: full-reference perceptual loss (used in training)
+        
+        # LPIPS: kept for validation/evaluation logging only (not in training loss)
         self.lpips = ps.PerceptualLoss(model='net-lin', net='vgg',
                                        use_gpu=torch.cuda.is_available(), gpu_ids=gpu_id)
 
+        # AHIQ: Attention-based Hybrid IQA (full-reference)
         if pyiqa is not None:
             try:
-                self.dbcnn_metric = pyiqa.create_metric('dbcnn', metric_mode='NR', device=device).eval()
-                self._dbcnn_available = True
-                print("DBCNN (NR) loss initialized successfully (pyiqa)")
+                self.ahiq_metric = pyiqa.create_metric('ahiq', device=device).eval()
+                self._ahiq_available = True
+                print("✓ AHIQ (FR) initialized: Hybrid ViT+CNN, attention-based")
             except Exception as e:
-                self.dbcnn_metric = None
-                self._dbcnn_available = False
-                print(f"Warning: DBCNN not available: {e}. Install/update pyiqa.")
+                self.ahiq_metric = None
+                self._ahiq_available = False
+                print(f"✗ AHIQ not available: {e}")
         else:
-            self.dbcnn_metric = None
-            self._dbcnn_available = False
-            print("Warning: DBCNN not available (pyiqa required).")
+            self.ahiq_metric = None
+            self._ahiq_available = False
+            print("✗ AHIQ not available (pyiqa required)")
 
-        print(gpu_id)
+        # TOPIQ: Top-down semantic-guided IQA (full-reference)
+        if pyiqa is not None:
+            try:
+                self.topiq_metric = pyiqa.create_metric('topiq_fr', device=device).eval()
+                self._topiq_available = True
+                print("✓ TOPIQ (FR) initialized: Semantic top-down, ResNet50")
+            except Exception as e:
+                self.topiq_metric = None
+                self._topiq_available = False
+                print(f"✗ TOPIQ not available: {e}")
+        else:
+            self.topiq_metric = None
+            self._topiq_available = False
+            print("✗ TOPIQ not available (pyiqa required)")
+
+        print(f"GPU ID: {gpu_id}")
         self.lmbda = lmbda
         self.metrics = metrics
         self.vgg = Vgg16().to(device).eval()
@@ -265,25 +293,43 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         out["rd_loss"] = self.mse(output["x_hat"], target)
         out["charbonnier"] = None
 
-        # LPIPS: full-reference perceptual loss (used in training)
+        # LPIPS: kept for validation/logging only (not in training loss)
         out["lpips"] = self.lpips(output["x_hat"], target).mean()
 
         # GMSD: removed from Phase 2
         out["gmsd"] = None
 
-        # DBCNN: no-reference blind IQA (higher=better, use 1-DBCNN as loss)
-        if self._dbcnn_available and self.dbcnn_metric is not None:
+        # AHIQ: Attention-based Hybrid IQA (FR, higher=better, use 1-AHIQ as loss)
+        if self._ahiq_available and self.ahiq_metric is not None:
             x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
-            if torch.isfinite(x_hat_clamped).all():
+            target_clamped = torch.clamp(target, 0.0, 1.0)
+            if torch.isfinite(x_hat_clamped).all() and torch.isfinite(target_clamped).all():
                 try:
-                    dbcnn_val = self.dbcnn_metric(x_hat_clamped)
-                    out["dbcnn"] = dbcnn_val.mean() if dbcnn_val.numel() > 1 else dbcnn_val
-                except Exception:
-                    out["dbcnn"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
+                    ahiq_score = self.ahiq_metric(x_hat_clamped, target_clamped)
+                    out["ahiq"] = ahiq_score.mean() if ahiq_score.numel() > 1 else ahiq_score
+                except Exception as e:
+                    print(f"AHIQ computation failed: {e}")
+                    out["ahiq"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
             else:
-                out["dbcnn"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
+                out["ahiq"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
         else:
-            out["dbcnn"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype, requires_grad=False)
+            out["ahiq"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype, requires_grad=False)
+
+        # TOPIQ: Top-down semantic-guided IQA (FR, higher=better, use 1-TOPIQ as loss)
+        if self._topiq_available and self.topiq_metric is not None:
+            x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
+            target_clamped = torch.clamp(target, 0.0, 1.0)
+            if torch.isfinite(x_hat_clamped).all() and torch.isfinite(target_clamped).all():
+                try:
+                    topiq_score = self.topiq_metric(x_hat_clamped, target_clamped)
+                    out["topiq"] = topiq_score.mean() if topiq_score.numel() > 1 else topiq_score
+                except Exception as e:
+                    print(f"TOPIQ computation failed: {e}")
+                    out["topiq"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
+            else:
+                out["topiq"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
+        else:
+            out["topiq"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype, requires_grad=False)
 
         x_hat_feat = [feat for feat in x_hat_feat]
         target_feat = [feat for feat in target_feat]

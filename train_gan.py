@@ -128,7 +128,9 @@ def main():
     optimizer_D = torch.optim.Adam(net_disc.parameters(), lr=args.lr_D)
     lr_scheduler_D = optim.lr_scheduler.MultiStepLR(optimizer_D, milestones=[80, 100], gamma=0.1)
 
-    # Phase 2 loss: RD + LPIPS + (1-DBCNN) + Style + GAN + bpp (no GMSD)
+    # Phase 2 loss: RD + (1-AHIQ) + (1-TOPIQ) + Style + GAN + bpp
+    # AHIQ: Attention-based Hybrid IQA (ViT+CNN, bottom-up, CVPR 2022)
+    # TOPIQ: Top-down semantic-guided IQA (ResNet50, 2023) 
     # Use metrics='mse' for MSE-based or 'ms-ssim' for MS-SSIM based rate-distortion
     criterion = RateDistortionPOELICLossPhase2(lmbda=args.lmbda, device=device, gpu_id=args.gpu_id, metrics='mse')
     
