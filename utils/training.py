@@ -153,28 +153,23 @@ def train_one_epoch_gan(
         pred_fake = model_disc(out_net["x_hat"])
         loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
 
-        # Skip LPIPS computation during training to save GPU memory (~500MB)
-        # LPIPS is only needed for validation logging, not in training loss
-        out_criterion = criterion(out_net, d, compute_lpips=False)
-        # Phase 2: RD + (1-AHIQ) + (1-TOPIQ) + Style + GAN + bpp
-        # AHIQ and TOPIQ are FR quality scores (higher=better), so use (1-score) as loss
-        ahiq = out_criterion.get("ahiq")
+        out_criterion = criterion(out_net, d)
+        # Phase 2: RD + LPIPS + (1-TOPIQ) + Style + GAN + bpp
+        # TOPIQ is a FR quality score (higher=better), so use (1-TOPIQ) as loss
         topiq = out_criterion.get("topiq")
         
-        ahiq_term = (config.get("lambda_ahiq", 0.5) * (1.0 - ahiq)) if (config is not None and ahiq is not None and isinstance(ahiq, torch.Tensor)) else ((1.0 - ahiq) if (ahiq is not None and isinstance(ahiq, torch.Tensor)) else torch.tensor(0.0, device=out_criterion["rd_loss"].device))
-        
-        topiq_term = (config.get("lambda_topiq", 0.7) * (1.0 - topiq)) if (config is not None and topiq is not None and isinstance(topiq, torch.Tensor)) else ((1.0 - topiq) if (topiq is not None and isinstance(topiq, torch.Tensor)) else torch.tensor(0.0, device=out_criterion["rd_loss"].device))
+        topiq_term = (config.get("lambda_topiq", 0.8) * (1.0 - topiq)) if (config is not None and topiq is not None and isinstance(topiq, torch.Tensor)) else ((1.0 - topiq) if (topiq is not None and isinstance(topiq, torch.Tensor)) else torch.tensor(0.0, device=out_criterion["rd_loss"].device))
         
         if config is not None:
             loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] +
-                          ahiq_term +
+                          config.get("lambda_lpips", 0.6) * out_criterion["lpips"] +
                           topiq_term +
                           config["lambda_style"] * out_criterion["style_loss"] +
                           config["lambda_gan"] * loss_G_fake +
                           config["lambda_bpp_rate"] * out_criterion["bpp_loss"])
         else:
             loss_G_total = (out_criterion["rd_loss"] +
-                          ahiq_term +
+                          out_criterion["lpips"] +
                           topiq_term +
                           out_criterion["style_loss"] +
                           loss_G_fake +
@@ -198,18 +193,14 @@ def train_one_epoch_gan(
             tb_logger.add_scalar('{}'.format('[train]: aux_loss'), aux_loss.item(), current_step)
             if out_criterion.get("rd_loss") is not None:
                 tb_logger.add_scalar('{}'.format('[train]: rd_loss'), out_criterion["rd_loss"].item(), current_step)
-            if out_criterion.get("ahiq") is not None and isinstance(out_criterion["ahiq"], torch.Tensor):
-                tb_logger.add_scalar('{}'.format('[train]: ahiq'), out_criterion["ahiq"].item(), current_step)
             if out_criterion.get("topiq") is not None and isinstance(out_criterion["topiq"], torch.Tensor):
                 tb_logger.add_scalar('{}'.format('[train]: topiq'), out_criterion["topiq"].item(), current_step)
             if out_criterion.get("lpips") is not None and isinstance(out_criterion["lpips"], torch.Tensor):
-                tb_logger.add_scalar('{}'.format('[train]: lpips_val_only'), out_criterion["lpips"].item(), current_step)
+                tb_logger.add_scalar('{}'.format('[train]: lpips'), out_criterion["lpips"].item(), current_step)
           
         if i % 100 == 0:
-                # Phase 2: RD + (1-AHIQ) + (1-TOPIQ) + Style + GAN + bpp
+                # Phase 2: RD + LPIPS + (1-TOPIQ) + Style + GAN + bpp
                 rd_str = f'{out_criterion["rd_loss"].item():.4f}'
-                ahiq_val = out_criterion.get("ahiq")
-                ahiq_str = f'{ahiq_val.item():.4f}' if isinstance(ahiq_val, torch.Tensor) else 'N/A'
                 topiq_val = out_criterion.get("topiq")
                 topiq_str = f'{topiq_val.item():.4f}' if isinstance(topiq_val, torch.Tensor) else 'N/A'
                 lpips_val = out_criterion.get("lpips")
@@ -221,9 +212,8 @@ def train_one_epoch_gan(
                     f" ({100. * i / len(train_dataloader):.0f}%)] "
                     f'Loss: {loss_G_total.item():.4f} | '
                     f'MSE (RD): {rd_str} | '
-                    f'AHIQ: {ahiq_str} | '
+                    f'LPIPS: {lpips_str} | '
                     f'TOPIQ: {topiq_str} | '
-                    f'LPIPS (val): {lpips_str} | '
                     f'Style: {out_criterion["style_loss"].item():.4f} | '
                     f'GAN: {loss_G_fake.item():.4f} | '
                     f'Bpp: {out_criterion["bpp_loss"].item():.2f} | '

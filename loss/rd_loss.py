@@ -14,15 +14,11 @@ except ImportError:
     print("Warning: piq library not found. Install with: pip install piq")
     PIQ_AVAILABLE = False
 
-# Add imports for AHIQ and TOPIQ (Phase 2, Full-Reference metrics) via pyiqa
+# Add imports for TOPIQ (Phase 2, Full-Reference metric) via pyiqa
 try:
     import pyiqa
-    GMSD_AVAILABLE = True
-    AHIQ_AVAILABLE = True  # set False in __init__ if create_metric fails
     TOPIQ_AVAILABLE = True  # set False in __init__ if create_metric fails
 except ImportError:
-    GMSD_AVAILABLE = False
-    AHIQ_AVAILABLE = False
     TOPIQ_AVAILABLE = False
     pyiqa = None
     print("Warning: pyiqa not found. Install with: pip install pyiqa") 
@@ -214,21 +210,21 @@ class RateDistortionPOELICLoss(nn.Module):
 
 
 class RateDistortionPOELICLossPhase2(nn.Module):
-    """Phase 2 loss: RD + (1-AHIQ) + (1-TOPIQ) + Style + GAN + bpp.
+    """Phase 2 loss: RD + LPIPS + (1-TOPIQ) + Style + GAN + bpp.
     
-    Training loss: RD + (1-AHIQ) + (1-TOPIQ) + Style + GAN + bpp rate.
+    Training loss: RD + LPIPS + (1-TOPIQ) + Style + GAN + bpp rate.
     
-    AHIQ: Attention-based Hybrid IQA (ViT+CNN, bottom-up, CVPR 2022)
-          - Combines spatial relationships and local texture
-          - Deformable convolution guided by semantic info
-          
+    LPIPS: Learned Perceptual Image Patch Similarity (VGG-based, AlexNet variant)
+           - Layer-wise perceptual feature matching
+           - Full-reference, low-level perceptual similarity
+           
     TOPIQ: Top-down semantic-guided IQA (ResNet50, 2023)
            - Cross-scale attention with semantic propagation
            - Focuses on semantically important distortions
+           - Full-reference, high-level semantic quality
            
-    Both are full-reference metrics (0-1 range, higher=better).
-    Complementary: AHIQ (attention, bottom-up) + TOPIQ (semantic, top-down).
-    LPIPS kept for validation logging only, not in training loss.
+    Complementary: LPIPS (low-level perceptual) + TOPIQ (high-level semantic).
+    Both full-reference metrics. TOPIQ outputs 0-1 range (higher=better).
     """
 
     def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None, metrics='mse'):
@@ -238,24 +234,9 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         self.style = StyleLoss()
         self.device = device
         
-        # LPIPS: kept for validation/evaluation logging only (not in training loss)
+        # LPIPS: Full-reference perceptual loss (used in training)
         self.lpips = ps.PerceptualLoss(model='net-lin', net='vgg',
                                        use_gpu=torch.cuda.is_available(), gpu_ids=gpu_id)
-
-        # AHIQ: Attention-based Hybrid IQA (full-reference)
-        if pyiqa is not None:
-            try:
-                self.ahiq_metric = pyiqa.create_metric('ahiq', device=device).eval()
-                self._ahiq_available = True
-                print("✓ AHIQ (FR) initialized: Hybrid ViT+CNN, attention-based")
-            except Exception as e:
-                self.ahiq_metric = None
-                self._ahiq_available = False
-                print(f"✗ AHIQ not available: {e}")
-        else:
-            self.ahiq_metric = None
-            self._ahiq_available = False
-            print("✗ AHIQ not available (pyiqa required)")
 
         # TOPIQ: Top-down semantic-guided IQA (full-reference)
         if pyiqa is not None:
@@ -277,15 +258,13 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         self.metrics = metrics
         self.vgg = Vgg16().to(device).eval()
 
-    def forward(self, output, target, compute_lpips=False):
+    def forward(self, output, target):
         """
         Forward pass for Phase 2 loss computation.
         
         Args:
             output: Model output dict with 'x_hat' and 'likelihoods'
             target: Ground truth images
-            compute_lpips: If True, compute LPIPS (for validation only).
-                          If False, skip LPIPS to save GPU memory during training.
         """
         N, _, H, W = target.size()
         out = {}
@@ -302,31 +281,8 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         out["rd_loss"] = self.mse(output["x_hat"], target)
         out["charbonnier"] = None
 
-        # LPIPS: Only compute during validation to save GPU memory
-        # Training loss uses AHIQ + TOPIQ instead
-        if compute_lpips:
-            out["lpips"] = self.lpips(output["x_hat"], target).mean()
-        else:
-            out["lpips"] = None
-
-        # GMSD: removed from Phase 2
-        out["gmsd"] = None
-
-        # AHIQ: Attention-based Hybrid IQA (FR, higher=better, use 1-AHIQ as loss)
-        if self._ahiq_available and self.ahiq_metric is not None:
-            x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
-            target_clamped = torch.clamp(target, 0.0, 1.0)
-            if torch.isfinite(x_hat_clamped).all() and torch.isfinite(target_clamped).all():
-                try:
-                    ahiq_score = self.ahiq_metric(x_hat_clamped, target_clamped)
-                    out["ahiq"] = ahiq_score.mean() if ahiq_score.numel() > 1 else ahiq_score
-                except Exception as e:
-                    print(f"AHIQ computation failed: {e}")
-                    out["ahiq"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
-            else:
-                out["ahiq"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
-        else:
-            out["ahiq"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype, requires_grad=False)
+        # LPIPS: Full-reference perceptual loss (used in training)
+        out["lpips"] = self.lpips(output["x_hat"], target).mean()
 
         # TOPIQ: Top-down semantic-guided IQA (FR, higher=better, use 1-TOPIQ as loss)
         if self._topiq_available and self.topiq_metric is not None:
