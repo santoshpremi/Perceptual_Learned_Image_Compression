@@ -367,11 +367,11 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
             # VSI is a FR quality score (higher=better), so use (1-VSI) as loss
             vsi_val = out_criterion.get("vsi")
             
-            vsi_term = (config.get("lambda_vsi", 0.8) * (1.0 - vsi_val)) if (config is not None and vsi_val is not None and isinstance(vsi_val, torch.Tensor)) else ((1.0 - vsi_val) if (vsi_val is not None and isinstance(vsi_val, torch.Tensor)) else torch.tensor(0.0, device=out_criterion["rd_loss"].device))
+            vsi_term = (config.get("lambda_vsi", 0.5) * (1.0 - vsi_val)) if (config is not None and vsi_val is not None and isinstance(vsi_val, torch.Tensor)) else ((1.0 - vsi_val) if (vsi_val is not None and isinstance(vsi_val, torch.Tensor)) else torch.tensor(0.0, device=out_criterion["rd_loss"].device))
             
             if config is not None:
-                loss_G_total = (config.get("lambda_rd", 1e-2) * out_criterion["rd_loss"] +
-                              config.get("lambda_lpips", 0.6) * out_criterion["lpips"] +
+                loss_G_total = (config.get("lambda_rd", 0.15) * out_criterion["rd_loss"] +
+                              config.get("lambda_lpips", 2.0) * out_criterion["lpips"] +
                               vsi_term +
                               config["lambda_style"] * out_criterion["style_loss"] +
                               config["lambda_gan"] * loss_G_fake +
@@ -448,7 +448,10 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
         f"MS-SSIM: {ms_ssim.avg:.6f} dB"
     )
     
-    return loss.avg
+    # Return metric for checkpoint selection (exclude GAN to avoid mode collapse artifacts)
+    # Use RD + LPIPS as stable quality metric (no adversarial term)
+    checkpoint_metric = rd_loss.avg + lpips.avg
+    return checkpoint_metric
 
 
 def test_one_epoch_gan_face(epoch, test_dataloader, model, model_disc,criterion, save_dir, logger_val, tb_logger, config):
