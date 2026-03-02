@@ -370,7 +370,7 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
             vsi_term = (config.get("lambda_vsi", 0.5) * (1.0 - vsi_val)) if (config is not None and vsi_val is not None and isinstance(vsi_val, torch.Tensor)) else ((1.0 - vsi_val) if (vsi_val is not None and isinstance(vsi_val, torch.Tensor)) else torch.tensor(0.0, device=out_criterion["rd_loss"].device))
             
             if config is not None:
-                loss_G_total = (config.get("lambda_rd", 0.15) * out_criterion["rd_loss"] +
+                loss_G_total = (config.get("lambda_rd", 0.01) * out_criterion["rd_loss"] +
                               config.get("lambda_lpips", 2.0) * out_criterion["lpips"] +
                               vsi_term +
                               config["lambda_style"] * out_criterion["style_loss"] +
@@ -397,7 +397,6 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
                 lpips_val = lpips_model(out_net["x_hat"], d).mean().item()
                 lpips.update(lpips_val)
             adv_loss.update(loss_G_fake.item())
-            # Track RD loss (MSE) for Phase 2
             if out_criterion.get("rd_loss") is not None:
                 rd_loss.update(out_criterion["rd_loss"].item())
             elif out_criterion.get("charbonnier") is not None:
@@ -448,9 +447,8 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
         f"MS-SSIM: {ms_ssim.avg:.6f} dB"
     )
     
-    # Return metric for checkpoint selection (exclude GAN to avoid mode collapse artifacts)
-    # Use RD + LPIPS as stable quality metric (no adversarial term)
-    checkpoint_metric = rd_loss.avg + lpips.avg
+    # Checkpoint: unscale rd_loss back to raw MSE so both terms are comparable (~0.003 + ~0.2)
+    checkpoint_metric = rd_loss.avg / (255 ** 2) + lpips.avg if rd_loss.count > 0 else lpips.avg
     return checkpoint_metric
 
 

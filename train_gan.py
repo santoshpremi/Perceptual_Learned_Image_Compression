@@ -70,7 +70,7 @@ def main():
         [transforms.RandomCrop(args.patch_size), transforms.ToTensor()]
     )
     test_transforms = transforms.Compose(
-        [transforms.CenterCrop(args.patch_size), transforms.ToTensor()]
+        [transforms.ToTensor()]
     )
 
     train_dataset = OpenImagesDataset(
@@ -188,13 +188,7 @@ def main():
         is_best = loss < best_loss
         best_loss = min(loss, best_loss)
 
-        # Update entropy models - use force=False to only update when safe
-        try:
-            updated = net.update(force=False)
-            if not updated:
-                logger_train.debug(f"Entropy model update skipped at epoch {epoch + 1}: not yet ready.")
-        except Exception as e:
-            logger_train.warning(f"Entropy model update failed at epoch {epoch + 1}: {e}")
+        net.update(force=True)
         
         if args.save:
             save_checkpoint(

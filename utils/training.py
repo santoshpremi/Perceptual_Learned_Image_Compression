@@ -161,7 +161,7 @@ def train_one_epoch_gan(
         vsi_term = (config.get("lambda_vsi", 0.5) * (1.0 - vsi)) if (config is not None and vsi is not None and isinstance(vsi, torch.Tensor)) else ((1.0 - vsi) if (vsi is not None and isinstance(vsi, torch.Tensor)) else torch.tensor(0.0, device=out_criterion["rd_loss"].device))
         
         if config is not None:
-            loss_G_total = (config.get("lambda_rd", 0.15) * out_criterion["rd_loss"] +
+            loss_G_total = (config.get("lambda_rd", 0.01) * out_criterion["rd_loss"] +
                           config.get("lambda_lpips", 2.0) * out_criterion["lpips"] +
                           vsi_term +
                           config["lambda_style"] * out_criterion["style_loss"] +

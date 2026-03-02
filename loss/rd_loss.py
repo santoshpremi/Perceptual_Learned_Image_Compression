@@ -63,7 +63,7 @@ class CharbonnierLoss(nn.Module):
         self.eps = eps
 
     def forward(self, x, y):
-        return torch.sqrt((x - y).pow(2) + self.eps**2).mean()
+        return torch.sum(torch.sqrt((x - y).pow(2) + self.eps**2))
     
 class GANLoss(nn.Module):
     """Define GAN loss.
@@ -204,7 +204,7 @@ class RateDistortionPOELICLoss(nn.Module):
         style_loss = 0.0
         for i in range(4):
             style_loss += self.style(x_hat_feat[i], target_feat[i])
-        out["style_loss"] = style_loss / 4.0
+        out["style_loss"] = style_loss
 
         return out
 
@@ -273,7 +273,7 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         x_hat_feat = self.vgg(output["x_hat"])
         target_feat = self.vgg(target)
 
-        out["rd_loss"] = self.mse(output["x_hat"], target)
+        out["rd_loss"] = self.mse(output["x_hat"], target) * (255 ** 2)
         out["charbonnier"] = None
 
         # LPIPS: Full-reference perceptual loss (used in training)
@@ -300,7 +300,7 @@ class RateDistortionPOELICLossPhase2(nn.Module):
         style_loss = 0.0
         for i in range(4):
             style_loss += self.style(x_hat_feat[i], target_feat[i])
-        out["style_loss"] = style_loss / 4.0
+        out["style_loss"] = style_loss
 
         return out
 

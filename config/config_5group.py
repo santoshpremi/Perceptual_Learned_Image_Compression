@@ -14,10 +14,10 @@ def model_config():
         "lambda_char": 2e-6,  # Charbonnier loss weight (Phase 1)
         "lambda_lpips": 2.0,  # LPIPS perceptual loss (Phase 1 and Phase 2)
         "lambda_style": 1.0,
-        "lambda_bpp_rate": 0.30,  # bpp rate loss weight
+        "lambda_bpp_rate": 1.0,   # bpp rate loss weight (HFLIC uses 1.0 in Phase 2)
         
         # Phase 2: RD + LPIPS + (1-VSI) + Style + GAN + bpp
-        "lambda_rd": 0.15,   # MSE (Rate-Distortion) loss weight for Phase 2 (stronger pixel anchor)
+        "lambda_rd": 0.01,   # MSE weight (rd_loss already scaled by 255^2, so conventional small lambda)
         "lambda_vsi": 0.5,   # VSI weight (FR): Visual Saliency-induced Index (higher=better)
         "lambda_face": 0,
         "lambda_gan": 1,  # GAN adversarial loss weight for Phase 2
