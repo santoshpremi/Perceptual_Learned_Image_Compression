@@ -10,15 +10,18 @@ def model_config():
         "slice_ch": [16, 16, 32, 64, 192],
         "quant": "ste",
         
-        # Phase 1: Original HFLIC loss weights
-        "lambda_char": 2e-6,  # Charbonnier loss weight (Phase 1)
-        "lambda_lpips": 2.0,  # LPIPS perceptual loss (Phase 1 and Phase 2)
+        # Phase 1: Match HFLIC paper (Eq. 7: Lperc + λ·R)
+        # HFLIC code uses all implicit weight 1.0 for Charbonnier(sum), LPIPS, Style
+        # BPP included because we have no MSE pre-training (HFLIC omits BPP after 500-epoch MSE pre-train)
+        "lambda_char": 1.0,
+        "lambda_lpips": 1.0,
         "lambda_style": 1.0,
-        "lambda_bpp_rate": 1.0,   # bpp rate loss weight (HFLIC uses 1.0 in Phase 2)
+        "lambda_bpp_rate": 1.0,
         
-        # Phase 2: RD + LPIPS + (1-VSI) + Style + GAN + bpp
-        "lambda_rd": 0.01,   # MSE weight (rd_loss already scaled by 255^2, so conventional small lambda)
-        "lambda_vsi": 0.5,   # VSI weight (FR): Visual Saliency-induced Index (higher=better)
+        # Phase 2: MSE + LPIPS + (1-VSI) + Style + GAN + BPP
+        # Matches HFLIC hardcoded Phase 2: 3e-4*Char + 2*LPIPS + Style + GAN + BPP
+        "lambda_rd": 0.01,   # MSE weight (rd_loss already scaled by 255^2)
+        "lambda_vsi": 5.0,   # VSI: increased from 0.5 so saliency-aware quality has real gradient influence
         "lambda_face": 0,
         "lambda_gan": 1,  # GAN adversarial loss weight for Phase 2
 
