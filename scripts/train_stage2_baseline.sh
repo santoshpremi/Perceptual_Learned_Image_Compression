@@ -20,8 +20,8 @@ echo ""
 
 # Run training with baseline script
 python train_gan_baseline.py \
-    --train_root "$TRAIN_ROOT" \
-    --train_split train \
-    --eval_root "$EVAL_ROOT" \
-    --eval_split kodak \
+    --train-root "$TRAIN_ROOT" \
+    --train-split train \
+    --eval-root "$EVAL_ROOT" \
+    --eval-split kodak \
     "${@:2}"
