@@ -223,6 +223,92 @@ def train_one_epoch_gan(
 
     return current_step
 
+def train_one_epoch_gan_baseline(
+    model, model_disc, criterion, train_dataloader, optimizer, aux_optimizer, optimizer_D, epoch, clip_max_norm, logger_train, tb_logger, current_step, config=None
+):
+    """BASELINE Phase 2 training: Original HFLIC loss - Charbonnier + LPIPS + Style + GAN + BPP.
+    
+    This is the ORIGINAL HFLIC Phase 2 for fair comparison.
+    HFLIC hardcoded weights: 3e-4 × Char + 2.0 × LPIPS + 1.0 × Style + 1.0 × GAN + 1.0 × BPP
+    """
+    model.train()
+    device = next(model.parameters()).device
+    gan_loss = GANLoss('hinge', loss_weight=2.0, real_label_val=1.0, fake_label_val=0.0)
+    
+    for i, d in enumerate(train_dataloader):
+        d = d.to(device)
+
+        optimizer_D.zero_grad()
+        
+        out_net = model(d)
+        pred_fake = model_disc(out_net["x_hat"].detach())
+        pred_real = model_disc(d)
+
+        loss_D_real = gan_loss(pred_real, True, is_disc=True)
+        loss_D_fake = gan_loss(pred_fake, False, is_disc=True)
+        loss_D_total = (loss_D_real + loss_D_fake) * 0.5
+        
+        loss_D_total.backward()
+        optimizer_D.step()
+
+        optimizer.zero_grad()
+        aux_optimizer.zero_grad()
+
+        pred_fake = model_disc(out_net["x_hat"])
+        loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
+
+        out_criterion = criterion(out_net, d)
+        
+        # HFLIC original Phase 2 weights (hardcoded as in paper)
+        # Only lambda_bpp_rate is configurable for different operating points
+        lambda_char = 3e-4      # HFLIC hardcoded
+        lambda_lpips = 2.0      # HFLIC hardcoded
+        lambda_style = 1.0      # HFLIC hardcoded
+        lambda_gan = 1.0        # HFLIC hardcoded
+        lambda_bpp = config.get("lambda_bpp_rate", 1.0) if config is not None else 1.0
+        
+        loss_G_total = (lambda_char * out_criterion["charbonnier"] +
+                       lambda_lpips * out_criterion["lpips"] +
+                       lambda_style * out_criterion["style_loss"] +
+                       lambda_gan * loss_G_fake +
+                       lambda_bpp * out_criterion["bpp_loss"])
+        
+        loss_G_total.backward()
+
+        if clip_max_norm > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), clip_max_norm)
+        optimizer.step()
+
+        aux_loss = model.aux_loss()
+        aux_loss.backward()
+        aux_optimizer.step()
+
+        current_step += 1
+
+        if current_step % 100 == 0:
+            tb_logger.add_scalar('[train]: loss', loss_G_total.item(), current_step)
+            tb_logger.add_scalar('[train]: bpp_loss', out_criterion["bpp_loss"].item(), current_step)
+            tb_logger.add_scalar('[train]: charbonnier', out_criterion["charbonnier"].item(), current_step)
+            tb_logger.add_scalar('[train]: lpips', out_criterion["lpips"].item(), current_step)
+            tb_logger.add_scalar('[train]: lr', optimizer.param_groups[0]['lr'], current_step)
+          
+        if i % 100 == 0:
+            logger_train.info(
+                f"Train epoch {epoch + 1}: ["
+                f"{i*len(d):5d}/{len(train_dataloader.dataset)}"
+                f" ({100. * i / len(train_dataloader):.0f}%)] "
+                f'Loss: {loss_G_total.item():.4f} | '
+                f'Char: {out_criterion["charbonnier"].item():.4f} | '
+                f'LPIPS: {out_criterion["lpips"].item():.4f} | '
+                f'Style: {out_criterion["style_loss"].item():.4f} | '
+                f'GAN: {loss_G_fake.item():.4f} | '
+                f'Bpp: {out_criterion["bpp_loss"].item():.2f} | '
+                f"Aux: {aux_loss.item():.2f}"
+            )
+
+    return current_step
+
+
 def train_one_epoch_gan_face(
     model, model_disc, criterion, train_dataloader, optimizer, aux_optimizer, optimizer_D, epoch, clip_max_norm, logger_train, tb_logger, current_step, config
 ):

@@ -304,6 +304,69 @@ class RateDistortionPOELICLossPhase2(nn.Module):
 
         return out
 
+class RateDistortionPOELICLossBaseline(nn.Module):
+    """Phase 2 BASELINE loss: Original HFLIC - Charbonnier + LPIPS + Style + GAN + BPP.
+    
+    This is the ORIGINAL HFLIC Phase 2 loss for fair comparison.
+    NO MSE, NO VSI - just the original HFLIC components.
+    
+    Loss = λ_char × Charbonnier(sum) + λ_lpips × LPIPS + λ_style × Style + λ_gan × GAN + λ_bpp × BPP
+    
+    HFLIC hardcoded weights: 3e-4 × Char + 2.0 × LPIPS + 1.0 × Style + 1.0 × GAN + 1.0 × BPP
+    """
+
+    def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None, metrics='mse'):
+        super().__init__()
+        self.charbonnier = CharbonnierLoss()
+        self.gan = GANLoss()
+        self.style = StyleLoss()
+        self.device = device
+        
+        self.lpips = ps.PerceptualLoss(model='net-lin', net='vgg',
+                                       use_gpu=torch.cuda.is_available(), gpu_ids=gpu_id)
+
+        print(f"[BASELINE] Phase 2 initialized: Charbonnier + LPIPS + Style + GAN + BPP")
+        print(f"GPU ID: {gpu_id}")
+        self.lmbda = lmbda
+        self.metrics = metrics
+        self.vgg = Vgg16().to(device).eval()
+
+    def forward(self, output, target):
+        """
+        Forward pass for BASELINE Phase 2 loss computation.
+        
+        Args:
+            output: Model output dict with 'x_hat' and 'likelihoods'
+            target: Ground truth images
+        """
+        N, _, H, W = target.size()
+        out = {}
+        num_pixels = N * H * W
+
+        out["bpp_loss"] = sum(
+            (torch.log(likelihoods).sum() / (-math.log(2) * num_pixels))
+            for likelihoods in output["likelihoods"].values()
+        )
+
+        x_hat_feat = self.vgg(output["x_hat"])
+        target_feat = self.vgg(target)
+
+        out["charbonnier"] = self.charbonnier(output["x_hat"], target)
+        out["rd_loss"] = None
+        out["vsi"] = None
+
+        out["lpips"] = self.lpips(output["x_hat"], target).mean()
+
+        x_hat_feat = [feat for feat in x_hat_feat]
+        target_feat = [feat for feat in target_feat]
+        style_loss = 0.0
+        for i in range(4):
+            style_loss += self.style(x_hat_feat[i], target_feat[i])
+        out["style_loss"] = style_loss
+
+        return out
+
+
 class RateDistortionPOELICFaceLoss(nn.Module):
     """Custom rate distortion loss with a Lagrangian parameter for face images."""
 

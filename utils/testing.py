@@ -452,6 +452,105 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     return checkpoint_metric
 
 
+def test_one_epoch_gan_baseline(epoch, test_dataloader, model, model_disc, criterion, save_dir, logger_val, tb_logger, config=None):
+    """BASELINE Phase 2 testing: Original HFLIC loss - Charbonnier + LPIPS + Style + GAN + BPP."""
+    model.eval()
+    device = next(model.parameters()).device
+    gan_loss = GANLoss('hinge', loss_weight=2.0, real_label_val=1.0, fake_label_val=0.0)
+
+    loss = AverageMeter()
+    bpp_loss = AverageMeter()
+    charbonnier = AverageMeter()
+    lpips = AverageMeter()
+    style_loss = AverageMeter()
+    adv_loss = AverageMeter()
+    aux_loss = AverageMeter()
+    psnr = AverageMeter()
+    ms_ssim = AverageMeter()
+
+    with torch.no_grad():
+        for i, d in enumerate(test_dataloader):
+            d = d.to(device)
+            
+            B, C, H, W = d.shape
+            pad_h = 0
+            pad_w = 0
+            if H % 64 != 0:
+                pad_h = 64 * (H // 64 + 1) - H
+            if W % 64 != 0:
+                pad_w = 64 * (W // 64 + 1) - W
+            
+            if pad_h > 0 or pad_w > 0:
+                d_pad = F.pad(d, (0, pad_w, 0, pad_h), mode='constant', value=0)
+            else:
+                d_pad = d
+            
+            out_net = model(d_pad)
+            
+            if pad_h > 0 or pad_w > 0:
+                out_net['x_hat'] = out_net['x_hat'][:, :, :H, :W]
+            
+            out_criterion = criterion(out_net, d)
+
+            pred_fake = model_disc(out_net["x_hat"])
+            loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
+            
+            # HFLIC original Phase 2 weights (hardcoded as in paper)
+            # Only lambda_bpp_rate is configurable for different operating points
+            lambda_char = 3e-4      # HFLIC hardcoded
+            lambda_lpips = 2.0      # HFLIC hardcoded
+            lambda_style = 1.0      # HFLIC hardcoded
+            lambda_gan = 1.0        # HFLIC hardcoded
+            lambda_bpp = config.get("lambda_bpp_rate", 1.0) if config is not None else 1.0
+            
+            loss_G_total = (lambda_char * out_criterion["charbonnier"] +
+                           lambda_lpips * out_criterion["lpips"] +
+                           lambda_style * out_criterion["style_loss"] +
+                           lambda_gan * loss_G_fake +
+                           lambda_bpp * out_criterion["bpp_loss"])
+
+            aux_loss.update(model.aux_loss())
+            bpp_loss.update(out_criterion["bpp_loss"].item())
+            loss.update(loss_G_total.item())
+            charbonnier.update(out_criterion["charbonnier"].item())
+            lpips.update(out_criterion["lpips"].item())
+            style_loss.update(out_criterion["style_loss"].item())
+            adv_loss.update(loss_G_fake.item())
+
+            rec = torch2img(out_net['x_hat'])
+            img = torch2img(d)
+            p, m = compute_metrics(rec, img)
+            psnr.update(p)
+            ms_ssim.update(m)
+
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
+            rec.save(os.path.join(save_dir, '%03d_rec.png' % i))
+            img.save(os.path.join(save_dir, '%03d_gt.png' % i))
+
+    tb_logger.add_scalar('[val]: loss', loss.avg, epoch + 1)
+    tb_logger.add_scalar('[val]: bpp_loss', bpp_loss.avg, epoch + 1)
+    tb_logger.add_scalar('[val]: psnr', psnr.avg, epoch + 1)
+    tb_logger.add_scalar('[val]: ms-ssim', ms_ssim.avg, epoch + 1)
+    tb_logger.add_scalar('[val]: charbonnier', charbonnier.avg, epoch + 1)
+    tb_logger.add_scalar('[val]: lpips', lpips.avg, epoch + 1)
+
+    logger_val.info(
+        f"Test epoch {epoch + 1}: Average losses: "
+        f"Loss: {loss.avg:.4f} | "
+        f"Char: {charbonnier.avg:.4f} | "
+        f"LPIPS: {lpips.avg:.4f} | "
+        f"Style: {style_loss.avg:.4f} | "
+        f"Adv: {adv_loss.avg:.4f} | "
+        f"Bpp: {bpp_loss.avg:.4f} | "
+        f"Aux: {aux_loss.avg:.2f} | "
+        f"PSNR: {psnr.avg:.6f} dB | "
+        f"MS-SSIM: {ms_ssim.avg:.6f} dB"
+    )
+    
+    return lpips.avg + bpp_loss.avg
+
+
 def test_one_epoch_gan_face(epoch, test_dataloader, model, model_disc,criterion, save_dir, logger_val, tb_logger, config):
     model.eval()
     device = next(model.parameters()).device
