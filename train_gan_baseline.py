@@ -141,7 +141,7 @@ def main():
         lr_scheduler._step_count = checkpoint['lr_scheduler']['_step_count']
         lr_scheduler.last_epoch = checkpoint['lr_scheduler']['last_epoch']
         start_epoch = checkpoint['epoch']
-        best_loss = checkpoint['loss']
+        best_loss = 1e10  # Reset for Phase 2 - different loss metric than Phase 1
         current_step = start_epoch * math.ceil(len(train_dataloader.dataset) / args.batch_size)
         checkpoint = None
     else:

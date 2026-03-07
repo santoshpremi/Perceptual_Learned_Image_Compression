@@ -16,7 +16,7 @@ def model_config():
         "lambda_char": 2e-6,
         "lambda_lpips": 1.0,
         "lambda_style": 100,
-        "lambda_bpp_rate": 0.6,
+        "lambda_bpp_rate": 0.3,
         
         # Phase 2 OURS: MSE + LPIPS + (1-VSI) + Style + GAN + BPP
         # Our modification: MSE instead of Charbonnier, add VSI
