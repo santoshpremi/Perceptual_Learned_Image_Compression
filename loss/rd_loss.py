@@ -63,7 +63,7 @@ class CharbonnierLoss(nn.Module):
         self.eps = eps
 
     def forward(self, x, y):
-        return torch.sum(torch.sqrt((x - y).pow(2) + self.eps**2))
+        return torch.mean(torch.sqrt((x - y).pow(2) + self.eps**2))
     
 class GANLoss(nn.Module):
     """Define GAN loss.
