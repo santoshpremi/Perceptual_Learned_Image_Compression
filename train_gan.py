@@ -1,3 +1,11 @@
+"""
+Phase 2 OUR Enhanced Training: DISTS + LPIPS method.
+
+Loss = λ_rd × MSE + λ_lpips × LPIPS + λ_dists × DISTS + λ_style × Style + λ_gan × GAN + λ_bpp × BPP
+
+This combines DISTS (structure/texture) and LPIPS (patch-level perception) for enhanced perceptual quality.
+"""
+
 import os
 import random
 import logging
@@ -17,7 +25,7 @@ from utils.utils import CustomDataParallel, save_checkpoint
 from utils.optimizers import configure_optimizers
 from utils.training import train_one_epoch_gan
 from utils.testing import test_one_epoch_gan
-from loss.rd_loss import RateDistortionPOELICLossPhase2
+from loss.rd_loss import RateDistortionPOELICLossDISTSLPIPS
 from utils.args import train_options
 from config.config_5group import model_config
 from models.models import ELIC
@@ -128,30 +136,32 @@ def main():
     optimizer_D = torch.optim.Adam(net_disc.parameters(), lr=args.lr_D)
     lr_scheduler_D = optim.lr_scheduler.MultiStepLR(optimizer_D, milestones=[80, 100], gamma=0.1)
 
-    # Phase 2 loss: RD + LPIPS + (1-VSI) + Style + GAN + bpp
-    # LPIPS: VGG-based perceptual loss (low-level feature matching)
-    # VSI: Visual Saliency-induced Index (FR, saliency-weighted quality)
-    # Use metrics='mse' for MSE-based or 'ms-ssim' for MS-SSIM based rate-distortion
-    criterion = RateDistortionPOELICLossPhase2(lmbda=args.lmbda, device=device, gpu_id=args.gpu_id, metrics='mse')
+    # Phase 2 loss: λ_rd × MSE + λ_lpips × LPIPS + λ_dists × DISTS + λ_style × Style + λ_gan × GAN + λ_bpp × BPP
+    # DISTS: Deep Image Structure and Texture Similarity (image-level structure preservation)
+    # LPIPS: Learned Perceptual Image Patch Similarity (patch-level perceptual quality)
+    criterion = RateDistortionPOELICLossDISTSLPIPS(lmbda=args.lmbda, device=device, gpu_id=args.gpu_id, metrics='mse')
     
     if args.checkpoint != None:
         checkpoint = torch.load(args.checkpoint)
         net.load_state_dict(checkpoint["state_dict"])
         optimizer.load_state_dict(checkpoint['optimizer'])
         aux_optimizer.load_state_dict(checkpoint['aux_optimizer'])
-        # lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
         lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[450,550], gamma=0.1)
         lr_scheduler._step_count = checkpoint['lr_scheduler']['_step_count']
         lr_scheduler.last_epoch = checkpoint['lr_scheduler']['last_epoch']
-        # print(lr_scheduler.state_dict())
         start_epoch = checkpoint['epoch']
-        best_loss = checkpoint['loss']
+        best_loss = 1e10  # Reset for Phase 2 - different loss metric than Phase 1
         current_step = start_epoch * math.ceil(len(train_dataloader.dataset) / args.batch_size)
         checkpoint = None
     else:
         start_epoch = 0
         best_loss = 1e10
         current_step = 0
+
+    logger_train.info("=" * 80)
+    logger_train.info("PHASE 2 OURS: DISTS + LPIPS Enhanced Method")
+    logger_train.info("Loss = λ_rd × MSE + λ_lpips × LPIPS + λ_dists × DISTS + λ_style × Style + λ_gan × GAN + λ_bpp × BPP")
+    logger_train.info("=" * 80)
 
     logger_train.info(f"Seed: {seed}")
     logger_train.info(args)

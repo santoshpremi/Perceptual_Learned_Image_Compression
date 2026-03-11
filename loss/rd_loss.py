@@ -367,6 +367,100 @@ class RateDistortionPOELICLossBaseline(nn.Module):
         return out
 
 
+class RateDistortionPOELICLossDISTSLPIPS(nn.Module):
+    """Phase 2 loss: λ_rd × MSE + λ_lpips × LPIPS + λ_dists × DISTS + λ_style × Style + λ_gan × GAN + λ_bpp × BPP.
+    
+    Enhanced method combining DISTS (image-level distortion) with LPIPS (patch-level perceptual similarity).
+    
+    Loss = λ_rd × MSE + λ_lpips × LPIPS + λ_dists × DISTS + λ_style × Style + λ_gan × GAN + λ_bpp × BPP
+    
+    DISTS: Deep Image Structure and Texture Similarity (better for structure preservation)
+    LPIPS: Learned Perceptual Image Patch Similarity (better for local details)
+    """
+
+    def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None, metrics='mse'):
+        super().__init__()
+        self.mse = nn.MSELoss()
+        self.gan = GANLoss()
+        self.style = StyleLoss()
+        self.device = device
+        
+        # LPIPS: Full-reference perceptual loss (patch-level)
+        self.lpips = ps.PerceptualLoss(model='net-lin', net='vgg',
+                                       use_gpu=torch.cuda.is_available(), gpu_ids=gpu_id)
+
+        # DISTS: Deep Image Structure and Texture Similarity (image-level)
+        if PIQ_AVAILABLE:
+            self.dists = DISTS().to(device).eval()
+            self._dists_available = True
+            print("✓ DISTS (FR) initialized: Deep Image Structure and Texture Similarity")
+        else:
+            self.dists = None
+            self._dists_available = False
+            print("✗ DISTS not available. Install with: pip install piq")
+
+        print(f"[OURS] Phase 2 initialized: λ_rd × MSE + λ_lpips × LPIPS + λ_dists × DISTS + λ_style × Style + λ_gan × GAN + λ_bpp × BPP")
+        print(f"GPU ID: {gpu_id}")
+        self.lmbda = lmbda
+        self.metrics = metrics
+        self.vgg = Vgg16().to(device).eval()
+
+    def forward(self, output, target):
+        """
+        Forward pass for DISTS+LPIPS Phase 2 loss computation.
+        
+        Args:
+            output: Model output dict with 'x_hat' and 'likelihoods'
+            target: Ground truth images
+        """
+        N, _, H, W = target.size()
+        out = {}
+        num_pixels = N * H * W
+
+        out["bpp_loss"] = sum(
+            (torch.log(likelihoods).sum() / (-math.log(2) * num_pixels))
+            for likelihoods in output["likelihoods"].values()
+        )
+
+        x_hat_feat = self.vgg(output["x_hat"])
+        target_feat = self.vgg(target)
+
+        # MSE: Reconstruction loss (rate-distortion)
+        out["rd_loss"] = self.mse(output["x_hat"], target) * (255 ** 2)
+        out["charbonnier"] = None
+
+        # LPIPS: Patch-level perceptual similarity
+        out["lpips"] = self.lpips(output["x_hat"], target).mean()
+
+        # DISTS: Image-level structure and texture similarity
+        if self._dists_available and self.dists is not None:
+            x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
+            target_clamped = torch.clamp(target, 0.0, 1.0)
+            if torch.isfinite(x_hat_clamped).all() and torch.isfinite(target_clamped).all():
+                try:
+                    dists_score = self.dists(x_hat_clamped, target_clamped)
+                    out["dists"] = dists_score.mean() if dists_score.numel() > 1 else dists_score
+                except Exception as e:
+                    print(f"DISTS computation failed: {e}")
+                    out["dists"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
+            else:
+                out["dists"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
+        else:
+            out["dists"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype, requires_grad=False)
+
+        x_hat_feat = [feat for feat in x_hat_feat]
+        target_feat = [feat for feat in target_feat]
+        style_loss = 0.0
+        for i in range(4):
+            style_loss += self.style(x_hat_feat[i], target_feat[i])
+        out["style_loss"] = style_loss
+
+        # VSI not used for DISTS+LPIPS method (kept for compatibility)
+        out["vsi"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype, requires_grad=False)
+
+        return out
+
+
 class RateDistortionPOELICFaceLoss(nn.Module):
     """Custom rate distortion loss with a Lagrangian parameter for face images."""
 

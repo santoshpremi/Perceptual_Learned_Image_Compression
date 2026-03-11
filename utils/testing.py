@@ -326,6 +326,7 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     rd_loss = AverageMeter()
     vsi = AverageMeter()
     lpips = AverageMeter()
+    dists = AverageMeter()
     style_loss = AverageMeter()
     adv_loss = AverageMeter()
     aux_loss = AverageMeter()
@@ -363,15 +364,18 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
 
             pred_fake = model_disc(out_net["x_hat"])
             loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
-            # Phase 2: RD + LPIPS + (1-VSI) + Style + GAN + bpp (matches training objective)
+            # Phase 2: RD + LPIPS + DISTS + (1-VSI) + Style + GAN + bpp (matches training objective)
             # VSI is a FR quality score (higher=better), so use (1-VSI) as loss
             vsi_val = out_criterion.get("vsi")
+            dists_val = out_criterion.get("dists")
             
-            vsi_term = (config.get("lambda_vsi", 0.5) * (1.0 - vsi_val)) if (config is not None and vsi_val is not None and isinstance(vsi_val, torch.Tensor)) else ((1.0 - vsi_val) if (vsi_val is not None and isinstance(vsi_val, torch.Tensor)) else torch.tensor(0.0, device=out_criterion["rd_loss"].device))
+            vsi_term = (config.get("lambda_vsi", 0.5) * (1.0 - vsi_val)) if (config is not None and vsi_val is not None and isinstance(vsi_val, torch.Tensor) and vsi_val != 0) else torch.tensor(0.0, device=out_criterion["rd_loss"].device)
+            dists_term = (config.get("lambda_dists", 1.0) * dists_val) if (config is not None and dists_val is not None and isinstance(dists_val, torch.Tensor) and dists_val != 0) else torch.tensor(0.0, device=out_criterion["rd_loss"].device)
             
             if config is not None:
                 loss_G_total = (config.get("lambda_rd", 0.01) * out_criterion["rd_loss"] +
                               config.get("lambda_lpips", 2.0) * out_criterion["lpips"] +
+                              dists_term +
                               vsi_term +
                               config["lambda_style"] * out_criterion["style_loss"] +
                               config["lambda_gan"] * loss_G_fake +
@@ -379,6 +383,7 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
             else:
                 loss_G_total = (out_criterion["rd_loss"] +
                               out_criterion["lpips"] +
+                              dists_term +
                               vsi_term +
                               out_criterion["style_loss"] +
                               loss_G_fake +
@@ -387,8 +392,10 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
             aux_loss.update(model.aux_loss())
             bpp_loss.update(out_criterion["bpp_loss"].item())
             loss.update(loss_G_total.item())
-            if vsi_val is not None and isinstance(vsi_val, torch.Tensor):
+            if vsi_val is not None and isinstance(vsi_val, torch.Tensor) and vsi_val != 0:
                 vsi.update(vsi_val.item())
+            if dists_val is not None and isinstance(dists_val, torch.Tensor) and dists_val != 0:
+                dists.update(dists_val.item())
             style_loss.update(out_criterion["style_loss"].item())
             # LPIPS: included in validation aggregate loss
             if out_criterion.get("lpips") is not None and isinstance(out_criterion["lpips"], torch.Tensor):
@@ -419,6 +426,8 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     tb_logger.add_scalar('{}'.format('[val]: ms-ssim'), ms_ssim.avg, epoch + 1)
     if vsi.count > 0:
         tb_logger.add_scalar('{}'.format('[val]: vsi'), vsi.avg, epoch + 1)
+    if dists.count > 0:
+        tb_logger.add_scalar('{}'.format('[val]: dists'), dists.avg, epoch + 1)
     if lpips.count > 0:
         tb_logger.add_scalar('{}'.format('[val]: lpips'), lpips.avg, epoch + 1)
     tb_logger.add_scalar('{}'.format('[val]: style loss'), style_loss.avg, epoch + 1)
@@ -431,6 +440,7 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     charbonnier_str = f"{charbonnier.avg:.4f}" if charbonnier.count > 0 else "N/A"
     vsi_str = f"{vsi.avg:.4f}" if vsi.count > 0 else "N/A"
     lpips_str = f"{lpips.avg:.4f}" if lpips.count > 0 else "N/A"
+    dists_str = f"{dists.avg:.4f}" if dists.count > 0 else "N/A"
 
     logger_val.info(
         f"Test epoch {epoch + 1}: Average losses: "
@@ -438,6 +448,7 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
         f"RD loss: {rd_str} | "
         f"Charbonnier loss: {charbonnier_str} | "
         f"LPIPS loss: {lpips_str} | "
+        f"DISTS loss: {dists_str} | "
         f"VSI: {vsi_str} | "
         f"Style loss: {style_loss.avg:.4f} | "
         f"Adv loss: {adv_loss.avg:.4f} | "
@@ -449,6 +460,8 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     
     # Checkpoint: unscale rd_loss back to raw MSE so both terms are comparable (~0.003 + ~0.2)
     checkpoint_metric = rd_loss.avg / (255 ** 2) + lpips.avg if rd_loss.count > 0 else lpips.avg
+    if dists.count > 0:
+        checkpoint_metric += dists.avg
     return checkpoint_metric
 
 

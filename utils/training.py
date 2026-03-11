@@ -154,15 +154,18 @@ def train_one_epoch_gan(
         loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
 
         out_criterion = criterion(out_net, d)
-        # Phase 2: RD + LPIPS + (1-VSI) + Style + GAN + bpp
+        # Phase 2: RD + LPIPS + (1-VSI) + Style + GAN + bpp (or DISTS variant)
         # VSI is a FR quality score (higher=better), so use (1-VSI) as loss
         vsi = out_criterion.get("vsi")
+        dists = out_criterion.get("dists")
         
-        vsi_term = (config.get("lambda_vsi", 0.5) * (1.0 - vsi)) if (config is not None and vsi is not None and isinstance(vsi, torch.Tensor)) else ((1.0 - vsi) if (vsi is not None and isinstance(vsi, torch.Tensor)) else torch.tensor(0.0, device=out_criterion["rd_loss"].device))
+        vsi_term = (config.get("lambda_vsi", 0.5) * (1.0 - vsi)) if (config is not None and vsi is not None and isinstance(vsi, torch.Tensor) and vsi != 0) else torch.tensor(0.0, device=out_criterion["rd_loss"].device)
+        dists_term = (config.get("lambda_dists", 1.0) * dists) if (config is not None and dists is not None and isinstance(dists, torch.Tensor) and dists != 0) else torch.tensor(0.0, device=out_criterion["rd_loss"].device)
         
         if config is not None:
             loss_G_total = (config.get("lambda_rd", 0.01) * out_criterion["rd_loss"] +
                           config.get("lambda_lpips", 2.0) * out_criterion["lpips"] +
+                          dists_term +
                           vsi_term +
                           config["lambda_style"] * out_criterion["style_loss"] +
                           config["lambda_gan"] * loss_G_fake +
@@ -170,6 +173,7 @@ def train_one_epoch_gan(
         else:
             loss_G_total = (out_criterion["rd_loss"] +
                           out_criterion["lpips"] +
+                          dists_term +
                           vsi_term +
                           out_criterion["style_loss"] +
                           loss_G_fake +
@@ -193,18 +197,22 @@ def train_one_epoch_gan(
             tb_logger.add_scalar('{}'.format('[train]: aux_loss'), aux_loss.item(), current_step)
             if out_criterion.get("rd_loss") is not None:
                 tb_logger.add_scalar('{}'.format('[train]: rd_loss'), out_criterion["rd_loss"].item(), current_step)
-            if out_criterion.get("vsi") is not None and isinstance(out_criterion["vsi"], torch.Tensor):
+            if out_criterion.get("vsi") is not None and isinstance(out_criterion["vsi"], torch.Tensor) and out_criterion["vsi"] != 0:
                 tb_logger.add_scalar('{}'.format('[train]: vsi'), out_criterion["vsi"].item(), current_step)
             if out_criterion.get("lpips") is not None and isinstance(out_criterion["lpips"], torch.Tensor):
                 tb_logger.add_scalar('{}'.format('[train]: lpips'), out_criterion["lpips"].item(), current_step)
+            if out_criterion.get("dists") is not None and isinstance(out_criterion["dists"], torch.Tensor) and out_criterion["dists"] != 0:
+                tb_logger.add_scalar('{}'.format('[train]: dists'), out_criterion["dists"].item(), current_step)
           
         if i % 100 == 0:
-                # Phase 2: RD + LPIPS + (1-VSI) + Style + GAN + bpp
+                # Phase 2: RD + LPIPS + (1-VSI) + Style + GAN + bpp (or DISTS variant)
                 rd_str = f'{out_criterion["rd_loss"].item():.4f}'
                 vsi_val = out_criterion.get("vsi")
-                vsi_str = f'{vsi_val.item():.4f}' if isinstance(vsi_val, torch.Tensor) else 'N/A'
+                vsi_str = f'{vsi_val.item():.4f}' if isinstance(vsi_val, torch.Tensor) and vsi_val != 0 else 'N/A'
                 lpips_val = out_criterion.get("lpips")
                 lpips_str = f'{lpips_val.item():.4f}' if isinstance(lpips_val, torch.Tensor) else 'N/A'
+                dists_val = out_criterion.get("dists")
+                dists_str = f'{dists_val.item():.4f}' if isinstance(dists_val, torch.Tensor) and dists_val != 0 else 'N/A'
 
                 logger_train.info(
                     f"Train epoch {epoch + 1}: ["
@@ -213,6 +221,7 @@ def train_one_epoch_gan(
                     f'Loss: {loss_G_total.item():.4f} | '
                     f'MSE (RD): {rd_str} | '
                     f'LPIPS: {lpips_str} | '
+                    f'DISTS: {dists_str} | '
                     f'VSI: {vsi_str} | '
                     f'Style: {out_criterion["style_loss"].item():.4f} | '
                     f'GAN: {loss_G_fake.item():.4f} | '
