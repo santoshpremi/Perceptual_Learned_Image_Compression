@@ -369,8 +369,17 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
             vsi_val = out_criterion.get("vsi")
             dists_val = out_criterion.get("dists")
             
-            vsi_term = (config.get("lambda_vsi", 0.5) * (1.0 - vsi_val)) if (config is not None and vsi_val is not None and isinstance(vsi_val, torch.Tensor) and vsi_val != 0) else torch.tensor(0.0, device=out_criterion["rd_loss"].device)
-            dists_term = (config.get("lambda_dists", 1.0) * dists_val) if (config is not None and dists_val is not None and isinstance(dists_val, torch.Tensor) and dists_val != 0) else torch.tensor(0.0, device=out_criterion["rd_loss"].device)
+            # VSI term: only if VSI is available and non-zero
+            if config is not None and vsi_val is not None and isinstance(vsi_val, torch.Tensor) and vsi_val.item() != 0:
+                vsi_term = config.get("lambda_vsi", 0.5) * (1.0 - vsi_val)
+            else:
+                vsi_term = torch.tensor(0.0, device=out_criterion["rd_loss"].device)
+            
+            # DISTS term: only if DISTS is available and non-zero
+            if config is not None and dists_val is not None and isinstance(dists_val, torch.Tensor) and dists_val.item() != 0:
+                dists_term = config.get("lambda_dists", 1.0) * dists_val
+            else:
+                dists_term = torch.tensor(0.0, device=out_criterion["rd_loss"].device)
             
             if config is not None:
                 loss_G_total = (config.get("lambda_rd", 0.01) * out_criterion["rd_loss"] +
@@ -392,9 +401,9 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
             aux_loss.update(model.aux_loss())
             bpp_loss.update(out_criterion["bpp_loss"].item())
             loss.update(loss_G_total.item())
-            if vsi_val is not None and isinstance(vsi_val, torch.Tensor) and vsi_val != 0:
+            if vsi_val is not None and isinstance(vsi_val, torch.Tensor) and vsi_val.item() != 0:
                 vsi.update(vsi_val.item())
-            if dists_val is not None and isinstance(dists_val, torch.Tensor) and dists_val != 0:
+            if dists_val is not None and isinstance(dists_val, torch.Tensor) and dists_val.item() != 0:
                 dists.update(dists_val.item())
             style_loss.update(out_criterion["style_loss"].item())
             # LPIPS: included in validation aggregate loss
