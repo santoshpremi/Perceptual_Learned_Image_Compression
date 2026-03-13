@@ -24,8 +24,8 @@ def model_config():
         "lambda_char": 2e-6,          # Charbonnier loss weight for Phase 1
         
         # Phase 2 OURS specific (MSE + DISTS/TOPIQ)
-        "lambda_rd": 0.01,            # MSE weight (rd_loss already scaled by 255^2)
-        "lambda_dists": 1.0,          # DISTS image-level structure/texture weight
+        "lambda_rd": 0.01,            # MSE weight (raw MSE, no scaling)
+        "lambda_dists": 0.6,          # DISTS image-level structure/texture weight
         "lambda_vsi": 0,              # VSI disabled (set >0 to enable)
         "lambda_topiq": 0,            # TOPIQ disabled (set >0 to enable)
         "lambda_face": 0,             # Face loss weight (for face-specific training)
