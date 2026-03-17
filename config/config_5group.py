@@ -16,7 +16,7 @@ def model_config():
         
         # Loss weights - common across phases
         "lambda_lpips": 2.0,          # LPIPS perceptual loss weight
-        "lambda_style": 1.0,          # Style loss weight
+        "lambda_style": 100.0,        # Style loss weight (HFLIC uses 1e2=100)
         "lambda_bpp_rate": 0.3,       # BPP rate weight (change for R-D points: 0.3, 0.6, 1.0)
         "lambda_gan": 1.0,            # GAN adversarial loss weight (Phase 2 only)
         
@@ -33,9 +33,9 @@ def model_config():
         # ═══════════════════════════════════════════════════════════════════
         # NOTES:
         # - Phase 1: Uses lambda_char, lambda_lpips, lambda_style, lambda_bpp_rate
-        # - Phase 2 Baseline: Uses hardcoded HFLIC weights (3e-4 Char, 2.0 LPIPS, 1.0 Style, 1.0 GAN)
-        #   Only lambda_bpp_rate is configurable for R-D curve points
+        # - Phase 2 Baseline: Uses lambda_char, lambda_lpips, lambda_style, lambda_gan, lambda_bpp_rate
         # - Phase 2 Ours: Uses lambda_rd, lambda_lpips, lambda_dists, lambda_style, lambda_gan, lambda_bpp_rate
+        # - All phases now read lambda_style from config (100.0) for consistency
         # ═══════════════════════════════════════════════════════════════════
     })
 

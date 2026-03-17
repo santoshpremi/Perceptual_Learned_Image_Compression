@@ -276,12 +276,11 @@ def train_one_epoch_gan_baseline(
 
         out_criterion = criterion(out_net, d)
         
-        # HFLIC original Phase 2 weights (hardcoded as in paper)
-        # Only lambda_bpp_rate is configurable for different operating points
-        lambda_char = 3e-4      # HFLIC hardcoded
-        lambda_lpips = 2.0      # HFLIC hardcoded
-        lambda_style = 1.0      # HFLIC hardcoded
-        lambda_gan = 1.0        # HFLIC hardcoded
+        # HFLIC Phase 2 weights - read from config for consistency with Phase 1
+        lambda_char = config.get("lambda_char", 3e-4) if config is not None else 3e-4
+        lambda_lpips = config.get("lambda_lpips", 2.0) if config is not None else 2.0
+        lambda_style = config.get("lambda_style", 100.0) if config is not None else 100.0
+        lambda_gan = config.get("lambda_gan", 1.0) if config is not None else 1.0
         lambda_bpp = config.get("lambda_bpp_rate", 1.0) if config is not None else 1.0
         
         loss_G_total = (lambda_char * out_criterion["charbonnier"] +
