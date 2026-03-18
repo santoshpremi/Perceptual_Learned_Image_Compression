@@ -467,8 +467,9 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
         f"MS-SSIM: {ms_ssim.avg:.6f} dB"
     )
     
-    # Checkpoint: rd_loss is already raw MSE (~0.003), combine with lpips (~0.09)
-    checkpoint_metric = rd_loss.avg + lpips.avg if rd_loss.count > 0 else lpips.avg
+    # For the DISTS+LPIPS path, rd_loss is tracked in pixel space (MSE * 255^2).
+    # Normalize it back before combining with perceptual metrics for checkpointing.
+    checkpoint_metric = (rd_loss.avg / (255 ** 2) + lpips.avg) if rd_loss.count > 0 else lpips.avg
     if dists.count > 0:
         checkpoint_metric += dists.avg
     return checkpoint_metric

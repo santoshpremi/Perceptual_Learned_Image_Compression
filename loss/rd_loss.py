@@ -425,8 +425,9 @@ class RateDistortionPOELICLossDISTSLPIPS(nn.Module):
         x_hat_feat = self.vgg(output["x_hat"])
         target_feat = self.vgg(target)
 
-        # MSE: Reconstruction loss (raw, no scaling)
-        out["rd_loss"] = self.mse(output["x_hat"], target)
+        # Keep MSE in pixel space so it has comparable scale to the
+        # previously successful DISTS+LPIPS runs.
+        out["rd_loss"] = self.mse(output["x_hat"], target) * (255 ** 2)
         out["charbonnier"] = None
 
         # LPIPS: Patch-level perceptual similarity
