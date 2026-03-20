@@ -425,9 +425,8 @@ class RateDistortionPOELICLossDISTSLPIPS(nn.Module):
         x_hat_feat = self.vgg(output["x_hat"])
         target_feat = self.vgg(target)
 
-        # Keep MSE in pixel space so it has comparable scale to the
-        # previously successful DISTS+LPIPS runs.
-        out["rd_loss"] = self.mse(output["x_hat"], target) * (255 ** 2)
+        # Use raw MSE to match the previously successful DISTS+LPIPS regime.
+        out["rd_loss"] = self.mse(output["x_hat"], target)
         out["charbonnier"] = None
 
         # LPIPS: Patch-level perceptual similarity
@@ -454,7 +453,8 @@ class RateDistortionPOELICLossDISTSLPIPS(nn.Module):
         style_loss = 0.0
         for i in range(4):
             style_loss += self.style(x_hat_feat[i], target_feat[i])
-        out["style_loss"] = style_loss
+        # Average over VGG levels to match the earlier successful Phase 2 setup.
+        out["style_loss"] = style_loss / 4.0
 
         # VSI not used for DISTS+LPIPS method (kept for compatibility)
         out["vsi"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype, requires_grad=False)
