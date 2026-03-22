@@ -75,7 +75,7 @@ def main():
         os.makedirs(os.path.join('./experiments', args.experiment, 'checkpoints'))
 
     train_transforms = transforms.Compose(
-        [transforms.RandomCrop(args.patch_size), transforms.RandomHorizontalFlip(), transforms.ToTensor()]
+        [transforms.RandomCrop(args.patch_size), transforms.ToTensor()]
     )
     test_transforms = transforms.Compose(
         [transforms.ToTensor()]

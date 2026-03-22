@@ -467,12 +467,8 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
         f"MS-SSIM: {ms_ssim.avg:.6f} dB"
     )
     
-    # For the DISTS+LPIPS path, use the raw-MSE regime and select checkpoints
-    # by the combined distortion/perceptual metric rather than adversarial loss.
-    checkpoint_metric = (rd_loss.avg + lpips.avg) if rd_loss.count > 0 else lpips.avg
-    if dists.count > 0:
-        checkpoint_metric += dists.avg
-    return checkpoint_metric
+    # Match the historical Phase 2 checkpointing behavior for the DISTS+LPIPS path.
+    return loss.avg
 
 
 def test_one_epoch_gan_baseline(epoch, test_dataloader, model, model_disc, criterion, save_dir, logger_val, tb_logger, config=None):
