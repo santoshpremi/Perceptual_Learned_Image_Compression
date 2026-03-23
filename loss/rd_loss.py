@@ -6,13 +6,20 @@ from loss import perceptual_loss as ps
 
 from models.vgg import Vgg16 
 
-# Add imports for DISTS (Phase 2 only)
+# Add imports for DISTS and PieAPP (Phase 2 only)
 try:
-    from piq import DISTS  # DISTS perceptual metric for Phase 2
+    from piq import DISTS, PieAPP
     PIQ_AVAILABLE = True
 except ImportError:
-    print("Warning: piq library not found. Install with: pip install piq")
-    PIQ_AVAILABLE = False
+    try:
+        from piq import DISTS
+        PieAPP = None
+        PIQ_AVAILABLE = True
+        print("Warning: PieAPP not available in piq. DISTS available.")
+    except ImportError:
+        PIQ_AVAILABLE = False
+        PieAPP = None
+        print("Warning: piq library not found. Install with: pip install piq")
 
 # Add imports for VSI (Phase 2, Full-Reference metric) via pyiqa
 try:
@@ -368,14 +375,10 @@ class RateDistortionPOELICLossBaseline(nn.Module):
 
 
 class RateDistortionPOELICLossDISTSLPIPS(nn.Module):
-    """Phase 2 loss: λ_rd × MSE + λ_lpips × LPIPS + λ_dists × DISTS + λ_style × Style + λ_gan × GAN + λ_bpp × BPP.
+    """Phase 2 loss with DISTS, PieAPP, LPIPS, MSE, Style, GAN, and BPP.
     
-    Enhanced method combining DISTS (image-level distortion) with LPIPS (patch-level perceptual similarity).
-    
-    Loss = λ_rd × MSE + λ_lpips × LPIPS + λ_dists × DISTS + λ_style × Style + λ_gan × GAN + λ_bpp × BPP
-    
-    DISTS: Deep Image Structure and Texture Similarity (better for structure preservation)
-    LPIPS: Learned Perceptual Image Patch Similarity (better for local details)
+    Training uses PieAPP + DISTS as perceptual losses.
+    LPIPS is always computed for validation logging.
     """
 
     def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None, metrics='mse'):
@@ -385,21 +388,31 @@ class RateDistortionPOELICLossDISTSLPIPS(nn.Module):
         self.style = StyleLoss()
         self.device = device
         
-        # LPIPS: Full-reference perceptual loss (patch-level)
+        # LPIPS: kept for validation evaluation
         self.lpips = ps.PerceptualLoss(model='net-lin', net='vgg',
                                        use_gpu=torch.cuda.is_available(), gpu_ids=gpu_id)
 
-        # DISTS: Deep Image Structure and Texture Similarity (image-level)
+        # DISTS: Deep Image Structure and Texture Similarity
         if PIQ_AVAILABLE:
             self.dists = DISTS().to(device).eval()
             self._dists_available = True
-            print("✓ DISTS (FR) initialized: Deep Image Structure and Texture Similarity")
+            print("✓ DISTS initialized")
         else:
             self.dists = None
             self._dists_available = False
-            print("✗ DISTS not available. Install with: pip install piq")
+            print("✗ DISTS not available")
 
-        print(f"[OURS] Phase 2 initialized: λ_rd × MSE + λ_lpips × LPIPS + λ_dists × DISTS + λ_style × Style + λ_gan × GAN + λ_bpp × BPP")
+        # PieAPP: Perceptual Image-Error Assessment through Pairwise Preference
+        if PIQ_AVAILABLE and PieAPP is not None:
+            self.pieapp = PieAPP().to(device).eval()
+            self._pieapp_available = True
+            print("✓ PieAPP initialized")
+        else:
+            self.pieapp = None
+            self._pieapp_available = False
+            print("✗ PieAPP not available")
+
+        print(f"[OURS] Phase 2: MSE + PieAPP + DISTS + LPIPS(val) + Style + GAN + BPP")
         print(f"GPU ID: {gpu_id}")
         self.lmbda = lmbda
         self.metrics = metrics
@@ -432,10 +445,11 @@ class RateDistortionPOELICLossDISTSLPIPS(nn.Module):
         # LPIPS: Patch-level perceptual similarity
         out["lpips"] = self.lpips(output["x_hat"], target).mean()
 
-        # DISTS: Image-level structure and texture similarity
+        x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
+        target_clamped = torch.clamp(target, 0.0, 1.0)
+
+        # DISTS
         if self._dists_available and self.dists is not None:
-            x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
-            target_clamped = torch.clamp(target, 0.0, 1.0)
             if torch.isfinite(x_hat_clamped).all() and torch.isfinite(target_clamped).all():
                 try:
                     dists_score = self.dists(x_hat_clamped, target_clamped)
@@ -448,15 +462,23 @@ class RateDistortionPOELICLossDISTSLPIPS(nn.Module):
         else:
             out["dists"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype, requires_grad=False)
 
+        # PieAPP
+        if self._pieapp_available and self.pieapp is not None:
+            try:
+                out["pieapp"] = self.pieapp(x_hat_clamped, target_clamped)
+            except Exception as e:
+                print(f"PieAPP computation failed: {e}")
+                out["pieapp"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
+        else:
+            out["pieapp"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype, requires_grad=False)
+
         x_hat_feat = [feat for feat in x_hat_feat]
         target_feat = [feat for feat in target_feat]
         style_loss = 0.0
         for i in range(4):
             style_loss += self.style(x_hat_feat[i], target_feat[i])
-        # Average over VGG levels to match the earlier successful Phase 2 setup.
         out["style_loss"] = style_loss / 4.0
 
-        # VSI not used for DISTS+LPIPS method (kept for compatibility)
         out["vsi"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype, requires_grad=False)
 
         return out

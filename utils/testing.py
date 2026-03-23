@@ -324,9 +324,9 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     bpp_loss = AverageMeter()
     charbonnier = AverageMeter()
     rd_loss = AverageMeter()
-    vsi = AverageMeter()
     lpips = AverageMeter()
     dists = AverageMeter()
+    pieapp = AverageMeter()
     style_loss = AverageMeter()
     adv_loss = AverageMeter()
     aux_loss = AverageMeter()
@@ -337,7 +337,6 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
         for i, d in enumerate(test_dataloader):
             d = d.to(device)
             
-            # Handle padding for images not divisible by 64
             B, C, H, W = d.shape
             pad_h = 0
             pad_w = 0
@@ -346,54 +345,47 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
             if W % 64 != 0:
                 pad_w = 64 * (W // 64 + 1) - W
             
-            # Pad image if needed
             if pad_h > 0 or pad_w > 0:
                 d_pad = F.pad(d, (0, pad_w, 0, pad_h), mode='constant', value=0)
             else:
                 d_pad = d
             
-            # Forward pass with padded image
             out_net = model(d_pad)
             
-            # Crop output back to original size before computing loss
             if pad_h > 0 or pad_w > 0:
                 out_net['x_hat'] = out_net['x_hat'][:, :, :H, :W]
             
-            # Now compute loss with correctly sized tensors
             out_criterion = criterion(out_net, d)
 
             pred_fake = model_disc(out_net["x_hat"])
             loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
-            # Phase 2: RD + LPIPS + DISTS + (1-VSI) + Style + GAN + bpp (matches training objective)
-            # VSI is a FR quality score (higher=better), so use (1-VSI) as loss
-            vsi_val = out_criterion.get("vsi")
+
             dists_val = out_criterion.get("dists")
+            pieapp_val = out_criterion.get("pieapp")
             
-            # VSI term: only if VSI is available and non-zero
-            if config is not None and vsi_val is not None and isinstance(vsi_val, torch.Tensor) and vsi_val.item() != 0:
-                vsi_term = config.get("lambda_vsi", 0.5) * (1.0 - vsi_val)
-            else:
-                vsi_term = torch.tensor(0.0, device=out_criterion["rd_loss"].device)
-            
-            # DISTS term: only if DISTS is available and non-zero
+            # DISTS term
             if config is not None and dists_val is not None and isinstance(dists_val, torch.Tensor) and dists_val.item() != 0:
-                dists_term = config.get("lambda_dists", 1.0) * dists_val
+                dists_term = config.get("lambda_dists", 0.5) * dists_val
             else:
                 dists_term = torch.tensor(0.0, device=out_criterion["rd_loss"].device)
             
+            # PieAPP term (matches training: PieAPP + DISTS)
+            if config is not None and pieapp_val is not None and isinstance(pieapp_val, torch.Tensor) and pieapp_val.item() != 0:
+                pieapp_term = config.get("lambda_pieapp", 0.5) * pieapp_val
+            else:
+                pieapp_term = torch.tensor(0.0, device=out_criterion["rd_loss"].device)
+            
             if config is not None:
                 loss_G_total = (config.get("lambda_rd", 0.01) * out_criterion["rd_loss"] +
-                              config.get("lambda_lpips", 2.0) * out_criterion["lpips"] +
+                              pieapp_term +
                               dists_term +
-                              vsi_term +
                               config["lambda_style"] * out_criterion["style_loss"] +
                               config["lambda_gan"] * loss_G_fake +
                               config["lambda_bpp_rate"] * out_criterion["bpp_loss"])
             else:
                 loss_G_total = (out_criterion["rd_loss"] +
-                              out_criterion["lpips"] +
+                              pieapp_term +
                               dists_term +
-                              vsi_term +
                               out_criterion["style_loss"] +
                               loss_G_fake +
                               out_criterion["bpp_loss"])
@@ -401,17 +393,17 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
             aux_loss.update(model.aux_loss())
             bpp_loss.update(out_criterion["bpp_loss"].item())
             loss.update(loss_G_total.item())
-            if vsi_val is not None and isinstance(vsi_val, torch.Tensor) and vsi_val.item() != 0:
-                vsi.update(vsi_val.item())
             if dists_val is not None and isinstance(dists_val, torch.Tensor) and dists_val.item() != 0:
                 dists.update(dists_val.item())
+            if pieapp_val is not None and isinstance(pieapp_val, torch.Tensor) and pieapp_val.item() != 0:
+                pieapp.update(pieapp_val.item())
             style_loss.update(out_criterion["style_loss"].item())
-            # LPIPS: included in validation aggregate loss
+            # LPIPS: kept for validation logging (not in training loss)
             if out_criterion.get("lpips") is not None and isinstance(out_criterion["lpips"], torch.Tensor):
                 lpips.update(out_criterion["lpips"].item())
             else:
-                lpips_val = lpips_model(out_net["x_hat"], d).mean().item()
-                lpips.update(lpips_val)
+                lpips_val_score = lpips_model(out_net["x_hat"], d).mean().item()
+                lpips.update(lpips_val_score)
             adv_loss.update(loss_G_fake.item())
             if out_criterion.get("rd_loss") is not None:
                 rd_loss.update(out_criterion["rd_loss"].item())
@@ -433,10 +425,10 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     tb_logger.add_scalar('{}'.format('[val]: bpp_loss'), bpp_loss.avg, epoch + 1)
     tb_logger.add_scalar('{}'.format('[val]: psnr'), psnr.avg, epoch + 1)
     tb_logger.add_scalar('{}'.format('[val]: ms-ssim'), ms_ssim.avg, epoch + 1)
-    if vsi.count > 0:
-        tb_logger.add_scalar('{}'.format('[val]: vsi'), vsi.avg, epoch + 1)
     if dists.count > 0:
         tb_logger.add_scalar('{}'.format('[val]: dists'), dists.avg, epoch + 1)
+    if pieapp.count > 0:
+        tb_logger.add_scalar('{}'.format('[val]: pieapp'), pieapp.avg, epoch + 1)
     if lpips.count > 0:
         tb_logger.add_scalar('{}'.format('[val]: lpips'), lpips.avg, epoch + 1)
     tb_logger.add_scalar('{}'.format('[val]: style loss'), style_loss.avg, epoch + 1)
@@ -447,9 +439,9 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
 
     rd_str = f"{rd_loss.avg:.4f}" if rd_loss.count > 0 else "N/A"
     charbonnier_str = f"{charbonnier.avg:.4f}" if charbonnier.count > 0 else "N/A"
-    vsi_str = f"{vsi.avg:.4f}" if vsi.count > 0 else "N/A"
     lpips_str = f"{lpips.avg:.4f}" if lpips.count > 0 else "N/A"
     dists_str = f"{dists.avg:.4f}" if dists.count > 0 else "N/A"
+    pieapp_str = f"{pieapp.avg:.4f}" if pieapp.count > 0 else "N/A"
 
     logger_val.info(
         f"Test epoch {epoch + 1}: Average losses: "
@@ -457,8 +449,8 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
         f"RD loss: {rd_str} | "
         f"Charbonnier loss: {charbonnier_str} | "
         f"LPIPS loss: {lpips_str} | "
+        f"PieAPP loss: {pieapp_str} | "
         f"DISTS loss: {dists_str} | "
-        f"VSI: {vsi_str} | "
         f"Style loss: {style_loss.avg:.4f} | "
         f"Adv loss: {adv_loss.avg:.4f} | "
         f"Bpp rate loss: {bpp_loss.avg:.4f} | "
@@ -467,7 +459,6 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
         f"MS-SSIM: {ms_ssim.avg:.6f} dB"
     )
     
-    # Match the historical Phase 2 checkpointing behavior for the DISTS+LPIPS path.
     return loss.avg
 
 

@@ -26,6 +26,7 @@ def model_config():
         # Phase 2 OURS specific (MSE + DISTS/TOPIQ)
         "lambda_rd": 0.01,            # Raw MSE weight (matches old successful DISTS+LPIPS regime)
         "lambda_dists": 0.5,          # DISTS image-level structure/texture weight
+        "lambda_pieapp": 0.5,         # PieAPP perceptual loss weight (Phase 2 training)
         "lambda_vsi": 0,              # VSI disabled (set >0 to enable)
         "lambda_topiq": 0,            # TOPIQ disabled (set >0 to enable)
         "lambda_face": 0,             # Face loss weight (for face-specific training)
