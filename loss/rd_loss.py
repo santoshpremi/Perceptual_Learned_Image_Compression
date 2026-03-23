@@ -24,11 +24,20 @@ except ImportError:
 # Add imports for VSI (Phase 2, Full-Reference metric) via pyiqa
 try:
     import pyiqa
-    VSI_AVAILABLE = True  # set False in __init__ if create_metric fails
+    VSI_AVAILABLE = True
 except ImportError:
     VSI_AVAILABLE = False
     pyiqa = None
-    print("Warning: pyiqa not found. Install with: pip install pyiqa") 
+    print("Warning: pyiqa not found. Install with: pip install pyiqa")
+
+# Wasserstein Distortion (CVPR 2025)
+try:
+    from wasserstein_distortion import VGG16WassersteinDistortion
+    WD_AVAILABLE = True
+except ImportError:
+    WD_AVAILABLE = False
+    VGG16WassersteinDistortion = None
+    print("Warning: wasserstein_distortion not found. Install with: pip install git+https://github.com/balle-lab/wasserstein-distortion.git") 
 
 class RateDistortionLoss(nn.Module):
     """Custom rate distortion loss with a Lagrangian parameter."""
@@ -471,6 +480,110 @@ class RateDistortionPOELICLossDISTSLPIPS(nn.Module):
                 out["pieapp"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
         else:
             out["pieapp"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype, requires_grad=False)
+
+        x_hat_feat = [feat for feat in x_hat_feat]
+        target_feat = [feat for feat in target_feat]
+        style_loss = 0.0
+        for i in range(4):
+            style_loss += self.style(x_hat_feat[i], target_feat[i])
+        out["style_loss"] = style_loss / 4.0
+
+        out["vsi"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype, requires_grad=False)
+
+        return out
+
+
+class RateDistortionPOELICLossWDDISTS(nn.Module):
+    """Phase 2 loss with Wasserstein Distortion + DISTS.
+    
+    Training: λ_rd × MSE + λ_wd × WD + λ_dists × DISTS + λ_style × Style + λ_gan × GAN + λ_bpp × BPP
+    LPIPS is computed for validation logging only.
+    """
+
+    def __init__(self, lmbda=1e-2, device="cuda", gpu_id=None, metrics='mse', wd_log2_sigma=4.0):
+        super().__init__()
+        self.mse = nn.MSELoss()
+        self.gan = GANLoss()
+        self.style = StyleLoss()
+        self.device = device
+        self.wd_log2_sigma_val = wd_log2_sigma
+
+        # LPIPS: kept for validation evaluation
+        self.lpips = ps.PerceptualLoss(model='net-lin', net='vgg',
+                                       use_gpu=torch.cuda.is_available(), gpu_ids=gpu_id)
+
+        # DISTS
+        if PIQ_AVAILABLE:
+            self.dists = DISTS().to(device).eval()
+            self._dists_available = True
+            print("✓ DISTS initialized")
+        else:
+            self.dists = None
+            self._dists_available = False
+            print("✗ DISTS not available")
+
+        # Wasserstein Distortion
+        if WD_AVAILABLE and VGG16WassersteinDistortion is not None:
+            self.wd = VGG16WassersteinDistortion().to(device).eval()
+            self._wd_available = True
+            print(f"✓ Wasserstein Distortion initialized (log2_sigma={wd_log2_sigma})")
+        else:
+            self.wd = None
+            self._wd_available = False
+            print("✗ Wasserstein Distortion not available")
+
+        print(f"[OURS] Phase 2: MSE + WD + DISTS + LPIPS(val) + Style + GAN + BPP")
+        print(f"GPU ID: {gpu_id}")
+        self.lmbda = lmbda
+        self.metrics = metrics
+        self.vgg = Vgg16().to(device).eval()
+
+    def forward(self, output, target):
+        N, _, H, W = target.size()
+        out = {}
+        num_pixels = N * H * W
+
+        out["bpp_loss"] = sum(
+            (torch.log(likelihoods).sum() / (-math.log(2) * num_pixels))
+            for likelihoods in output["likelihoods"].values()
+        )
+
+        x_hat_feat = self.vgg(output["x_hat"])
+        target_feat = self.vgg(target)
+
+        out["rd_loss"] = self.mse(output["x_hat"], target)
+        out["charbonnier"] = None
+
+        # LPIPS: computed for validation logging
+        out["lpips"] = self.lpips(output["x_hat"], target).mean()
+
+        x_hat_clamped = torch.clamp(output["x_hat"], 0.0, 1.0)
+        target_clamped = torch.clamp(target, 0.0, 1.0)
+
+        # DISTS
+        if self._dists_available and self.dists is not None:
+            if torch.isfinite(x_hat_clamped).all() and torch.isfinite(target_clamped).all():
+                try:
+                    dists_score = self.dists(x_hat_clamped, target_clamped)
+                    out["dists"] = dists_score.mean() if dists_score.numel() > 1 else dists_score
+                except Exception as e:
+                    print(f"DISTS computation failed: {e}")
+                    out["dists"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
+            else:
+                out["dists"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
+        else:
+            out["dists"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype, requires_grad=False)
+
+        # Wasserstein Distortion
+        if self._wd_available and self.wd is not None:
+            try:
+                log2_sigma = torch.zeros(N, 1, H, W, device=output["x_hat"].device) + self.wd_log2_sigma_val
+                out["wd"] = self.wd(x_hat_clamped, target_clamped, log2_sigma)
+            except Exception as e:
+                print(f"WD computation failed: {e}")
+                out["wd"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype)
+        else:
+            out["wd"] = torch.tensor(0.0, device=output["x_hat"].device, dtype=output["x_hat"].dtype, requires_grad=False)
 
         x_hat_feat = [feat for feat in x_hat_feat]
         target_feat = [feat for feat in target_feat]

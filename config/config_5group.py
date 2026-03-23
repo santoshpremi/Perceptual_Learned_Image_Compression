@@ -17,7 +17,7 @@ def model_config():
         # Loss weights - common across phases
         "lambda_lpips": 1.0,          # LPIPS perceptual loss weight
         "lambda_style": 100.0,        # Style loss weight (HFLIC uses 1e2=100)
-        "lambda_bpp_rate": 1.0,       # Control run for ours; sweep 0.35, 0.5, 0.9 for R-D points
+        "lambda_bpp_rate": 0.6,       # Control run for ours; sweep 0.35, 0.5, 0.9 for R-D points
         "lambda_gan": 1.0,            # GAN adversarial loss weight (Phase 2 only)
         
         # Phase 1 specific (Charbonnier-based, no GAN)
@@ -27,6 +27,7 @@ def model_config():
         "lambda_rd": 0.01,            # Raw MSE weight (matches old successful DISTS+LPIPS regime)
         "lambda_dists": 0.5,          # DISTS image-level structure/texture weight
         "lambda_pieapp": 0.5,         # PieAPP perceptual loss weight (Phase 2 training)
+        "lambda_wd": 1.0,             # Wasserstein Distortion weight (Phase 2 WD+DISTS variant)
         "lambda_vsi": 0,              # VSI disabled (set >0 to enable)
         "lambda_topiq": 0,            # TOPIQ disabled (set >0 to enable)
         "lambda_face": 0,             # Face loss weight (for face-specific training)

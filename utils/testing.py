@@ -462,6 +462,148 @@ def test_one_epoch_gan(epoch, test_dataloader, model, model_disc,criterion, save
     return loss.avg
 
 
+def test_one_epoch_gan_wd(epoch, test_dataloader, model, model_disc, criterion, save_dir, logger_val, tb_logger, config=None):
+    """Phase 2 WD+DISTS validation. LPIPS logged for comparison."""
+    model.eval()
+    device = next(model.parameters()).device
+    gan_loss = GANLoss('hinge', loss_weight=2.0, real_label_val=1.0, fake_label_val=0.0)
+
+    lpips_model = ps.PerceptualLoss(model='net-lin', net='vgg',
+                                   use_gpu=torch.cuda.is_available(),
+                                   gpu_ids=[0])
+    lpips_model.eval()
+
+    loss = AverageMeter()
+    bpp_loss = AverageMeter()
+    rd_loss = AverageMeter()
+    lpips = AverageMeter()
+    dists = AverageMeter()
+    wd = AverageMeter()
+    style_loss = AverageMeter()
+    adv_loss = AverageMeter()
+    aux_loss = AverageMeter()
+    psnr = AverageMeter()
+    ms_ssim = AverageMeter()
+
+    with torch.no_grad():
+        for i, d in enumerate(test_dataloader):
+            d = d.to(device)
+
+            B, C, H, W = d.shape
+            pad_h = 0
+            pad_w = 0
+            if H % 64 != 0:
+                pad_h = 64 * (H // 64 + 1) - H
+            if W % 64 != 0:
+                pad_w = 64 * (W // 64 + 1) - W
+
+            if pad_h > 0 or pad_w > 0:
+                d_pad = F.pad(d, (0, pad_w, 0, pad_h), mode='constant', value=0)
+            else:
+                d_pad = d
+
+            out_net = model(d_pad)
+
+            if pad_h > 0 or pad_w > 0:
+                out_net['x_hat'] = out_net['x_hat'][:, :, :H, :W]
+
+            out_criterion = criterion(out_net, d)
+
+            pred_fake = model_disc(out_net["x_hat"])
+            loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
+
+            dists_val = out_criterion.get("dists")
+            wd_val = out_criterion.get("wd")
+
+            dists_term = torch.tensor(0.0, device=out_criterion["rd_loss"].device)
+            if config is not None and dists_val is not None and isinstance(dists_val, torch.Tensor) and dists_val.item() != 0:
+                dists_term = config.get("lambda_dists", 0.5) * dists_val
+
+            wd_term = torch.tensor(0.0, device=out_criterion["rd_loss"].device)
+            if config is not None and wd_val is not None and isinstance(wd_val, torch.Tensor) and wd_val.item() != 0:
+                wd_term = config.get("lambda_wd", 0.5) * wd_val
+
+            if config is not None:
+                loss_G_total = (config.get("lambda_rd", 0.01) * out_criterion["rd_loss"] +
+                              wd_term +
+                              dists_term +
+                              config["lambda_style"] * out_criterion["style_loss"] +
+                              config["lambda_gan"] * loss_G_fake +
+                              config["lambda_bpp_rate"] * out_criterion["bpp_loss"])
+            else:
+                loss_G_total = (out_criterion["rd_loss"] +
+                              wd_term +
+                              dists_term +
+                              out_criterion["style_loss"] +
+                              loss_G_fake +
+                              out_criterion["bpp_loss"])
+
+            aux_loss.update(model.aux_loss())
+            bpp_loss.update(out_criterion["bpp_loss"].item())
+            loss.update(loss_G_total.item())
+            if dists_val is not None and isinstance(dists_val, torch.Tensor) and dists_val.item() != 0:
+                dists.update(dists_val.item())
+            if wd_val is not None and isinstance(wd_val, torch.Tensor) and wd_val.item() != 0:
+                wd.update(wd_val.item())
+            style_loss.update(out_criterion["style_loss"].item())
+            # LPIPS: validation logging only
+            if out_criterion.get("lpips") is not None and isinstance(out_criterion["lpips"], torch.Tensor):
+                lpips.update(out_criterion["lpips"].item())
+            else:
+                lpips_val_score = lpips_model(out_net["x_hat"], d).mean().item()
+                lpips.update(lpips_val_score)
+            adv_loss.update(loss_G_fake.item())
+            if out_criterion.get("rd_loss") is not None:
+                rd_loss.update(out_criterion["rd_loss"].item())
+
+            rec = torch2img(out_net['x_hat'])
+            img = torch2img(d)
+            p, m = compute_metrics(rec, img)
+            psnr.update(p)
+            ms_ssim.update(m)
+
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
+            rec.save(os.path.join(save_dir, '%03d_rec.png' % i))
+            img.save(os.path.join(save_dir, '%03d_gt.png' % i))
+
+    tb_logger.add_scalar('{}'.format('[val]: loss'), loss.avg, epoch + 1)
+    tb_logger.add_scalar('{}'.format('[val]: bpp_loss'), bpp_loss.avg, epoch + 1)
+    tb_logger.add_scalar('{}'.format('[val]: psnr'), psnr.avg, epoch + 1)
+    tb_logger.add_scalar('{}'.format('[val]: ms-ssim'), ms_ssim.avg, epoch + 1)
+    if dists.count > 0:
+        tb_logger.add_scalar('{}'.format('[val]: dists'), dists.avg, epoch + 1)
+    if wd.count > 0:
+        tb_logger.add_scalar('{}'.format('[val]: wd'), wd.avg, epoch + 1)
+    if lpips.count > 0:
+        tb_logger.add_scalar('{}'.format('[val]: lpips'), lpips.avg, epoch + 1)
+    tb_logger.add_scalar('{}'.format('[val]: style loss'), style_loss.avg, epoch + 1)
+    if rd_loss.count > 0:
+        tb_logger.add_scalar('{}'.format('[val]: rd_loss'), rd_loss.avg, epoch + 1)
+
+    rd_str = f"{rd_loss.avg:.4f}" if rd_loss.count > 0 else "N/A"
+    lpips_str = f"{lpips.avg:.4f}" if lpips.count > 0 else "N/A"
+    dists_str = f"{dists.avg:.4f}" if dists.count > 0 else "N/A"
+    wd_str = f"{wd.avg:.4f}" if wd.count > 0 else "N/A"
+
+    logger_val.info(
+        f"Test epoch {epoch + 1}: Average losses: "
+        f"Loss: {loss.avg:.4f} | "
+        f"RD loss: {rd_str} | "
+        f"LPIPS loss: {lpips_str} | "
+        f"WD loss: {wd_str} | "
+        f"DISTS loss: {dists_str} | "
+        f"Style loss: {style_loss.avg:.4f} | "
+        f"Adv loss: {adv_loss.avg:.4f} | "
+        f"Bpp rate loss: {bpp_loss.avg:.4f} | "
+        f"Aux loss: {aux_loss.avg:.2f} | "
+        f"PSNR: {psnr.avg:.6f} dB | "
+        f"MS-SSIM: {ms_ssim.avg:.6f} dB"
+    )
+
+    return loss.avg
+
+
 def test_one_epoch_gan_baseline(epoch, test_dataloader, model, model_disc, criterion, save_dir, logger_val, tb_logger, config=None):
     """BASELINE Phase 2 testing: Original HFLIC loss - Charbonnier + LPIPS + Style + GAN + BPP."""
     model.eval()

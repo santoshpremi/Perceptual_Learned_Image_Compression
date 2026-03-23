@@ -231,6 +231,108 @@ def train_one_epoch_gan(
 
     return current_step
 
+
+def train_one_epoch_gan_wd(
+    model, model_disc, criterion, train_dataloader, optimizer, aux_optimizer, optimizer_D, epoch, clip_max_norm, logger_train, tb_logger, current_step, config=None
+):
+    """Phase 2 training: WD + DISTS. LPIPS is not in the training loss."""
+    model.train()
+    device = next(model.parameters()).device
+    gan_loss = GANLoss('hinge', loss_weight=2.0, real_label_val=1.0, fake_label_val=0.0)
+    for i, d in enumerate(train_dataloader):
+        d = d.to(device)
+
+        optimizer_D.zero_grad()
+        out_net = model(d)
+        pred_fake = model_disc(out_net["x_hat"].detach())
+        pred_real = model_disc(d)
+
+        loss_D_real = gan_loss(pred_real, True, is_disc=True)
+        loss_D_fake = gan_loss(pred_fake, False, is_disc=True)
+        loss_D_total = (loss_D_real + loss_D_fake) * 0.5
+        loss_D_total.backward()
+        optimizer_D.step()
+
+        optimizer.zero_grad()
+        aux_optimizer.zero_grad()
+
+        pred_fake = model_disc(out_net["x_hat"])
+        loss_G_fake = gan_loss(pred_fake, False, is_disc=False)
+
+        out_criterion = criterion(out_net, d)
+        dists = out_criterion.get("dists")
+        wd = out_criterion.get("wd")
+
+        dists_term = torch.tensor(0.0, device=out_criterion["rd_loss"].device)
+        if config is not None and dists is not None and isinstance(dists, torch.Tensor) and dists.item() != 0:
+            dists_term = config.get("lambda_dists", 0.5) * dists
+
+        wd_term = torch.tensor(0.0, device=out_criterion["rd_loss"].device)
+        if config is not None and wd is not None and isinstance(wd, torch.Tensor) and wd.item() != 0:
+            wd_term = config.get("lambda_wd", 0.5) * wd
+
+        if config is not None:
+            loss_G_total = (config.get("lambda_rd", 0.01) * out_criterion["rd_loss"] +
+                          wd_term +
+                          dists_term +
+                          config["lambda_style"] * out_criterion["style_loss"] +
+                          config["lambda_gan"] * loss_G_fake +
+                          config["lambda_bpp_rate"] * out_criterion["bpp_loss"])
+        else:
+            loss_G_total = (out_criterion["rd_loss"] +
+                          wd_term +
+                          dists_term +
+                          out_criterion["style_loss"] +
+                          loss_G_fake +
+                          out_criterion["bpp_loss"])
+        loss_G_total.backward()
+
+        if clip_max_norm > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), clip_max_norm)
+        optimizer.step()
+
+        aux_loss = model.aux_loss()
+        aux_loss.backward()
+        aux_optimizer.step()
+
+        current_step += 1
+
+        if current_step % 100 == 0:
+            tb_logger.add_scalar('[train]: loss', loss_G_total.item(), current_step)
+            tb_logger.add_scalar('[train]: bpp_loss', out_criterion["bpp_loss"].item(), current_step)
+            tb_logger.add_scalar('[train]: lr', optimizer.param_groups[0]['lr'], current_step)
+            tb_logger.add_scalar('[train]: aux_loss', aux_loss.item(), current_step)
+            if out_criterion.get("rd_loss") is not None:
+                tb_logger.add_scalar('[train]: rd_loss', out_criterion["rd_loss"].item(), current_step)
+            if out_criterion.get("wd") is not None and isinstance(out_criterion["wd"], torch.Tensor) and out_criterion["wd"].item() != 0:
+                tb_logger.add_scalar('[train]: wd', out_criterion["wd"].item(), current_step)
+            if out_criterion.get("dists") is not None and isinstance(out_criterion["dists"], torch.Tensor) and out_criterion["dists"].item() != 0:
+                tb_logger.add_scalar('[train]: dists', out_criterion["dists"].item(), current_step)
+
+        if i % 100 == 0:
+                rd_str = f'{out_criterion["rd_loss"].item():.4f}'
+                wd_val = out_criterion.get("wd")
+                wd_str = f'{wd_val.item():.4f}' if isinstance(wd_val, torch.Tensor) and wd_val.item() != 0 else 'N/A'
+                dists_val = out_criterion.get("dists")
+                dists_str = f'{dists_val.item():.4f}' if isinstance(dists_val, torch.Tensor) and dists_val.item() != 0 else 'N/A'
+
+                logger_train.info(
+                    f"Train epoch {epoch + 1}: ["
+                    f"{i*len(d):5d}/{len(train_dataloader.dataset)}"
+                    f" ({100. * i / len(train_dataloader):.0f}%)] "
+                    f'Loss: {loss_G_total.item():.4f} | '
+                    f'RD loss: {rd_str} | '
+                    f'WD: {wd_str} | '
+                    f'DISTS: {dists_str} | '
+                    f'Style: {out_criterion["style_loss"].item():.4f} | '
+                    f'GAN: {loss_G_fake.item():.4f} | '
+                    f'Bpp: {out_criterion["bpp_loss"].item():.2f} | '
+                    f"Aux: {aux_loss.item():.2f}"
+                )
+
+    return current_step
+
+
 def train_one_epoch_gan_baseline(
     model, model_disc, criterion, train_dataloader, optimizer, aux_optimizer, optimizer_D, epoch, clip_max_norm, logger_train, tb_logger, current_step, config=None
 ):
