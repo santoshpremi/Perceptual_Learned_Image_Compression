@@ -239,5 +239,5 @@ Stage 2 (GAN finetuning): train_gan.py
 - [x] Mirror HFLIC implementation at repository root.
 - [x] Provide dataset preparation scripts and configuration templates.
 - [x] Supply environment setup and training/evaluation helpers.
-- [ ] Run finetuning/benchmark experiments and collect results.
-- [ ] Document findings and prepare practicum deliverables.
+- [x] Run finetuning/benchmark experiments and collect results.
+- [x] Document findings and prepare practicum deliverables.
